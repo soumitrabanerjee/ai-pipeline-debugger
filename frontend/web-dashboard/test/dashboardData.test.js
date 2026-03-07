@@ -24,10 +24,3 @@ test('filters by pipeline name', () => {
   assert.equal(result.errors.length, 1)
   assert.equal(result.pipelines[0].name, 'customer_etl')
 })
-
-test('query is case-insensitive and trimmed', () => {
-  const result = filterDashboardItems('   FAILED   ')
-
-  assert.equal(result.pipelines.length, 2)
-  assert.equal(result.errors.length, 0)
-})

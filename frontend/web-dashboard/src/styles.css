@@ -21,14 +21,9 @@ p {
 .dashboard-page {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 2rem 1rem 3rem;
   display: grid;
   gap: 1.25rem;
-}
-
-.dashboard-title {
-  font-size: 2rem;
-  font-weight: 700;
 }
 
 .search-row {
@@ -38,21 +33,18 @@ p {
 
 .dashboard-input {
   flex: 1;
-  border: 1px solid #d5e2e8;
+  border: 1px solid #c9dbe3;
   border-radius: 10px;
-  padding: 0.7rem 0.75rem;
+  padding: 0.65rem 0.75rem;
   font-size: 1rem;
-  background: #fff;
 }
 
 .dashboard-button {
-  width: 44px;
   border: none;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
   background: #0f4c5c;
   color: #fff;
+  border-radius: 10px;
+  width: 44px;
   cursor: pointer;
 }
 
@@ -63,19 +55,15 @@ p {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
 }
 
-.card-content {
-  display: grid;
-  gap: 0.35rem;
-}
-
-.card-title {
-  font-size: 1.25rem;
-}
-
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1rem;
+}
+
+.stat-card {
+  display: grid;
+  gap: 0.35rem;
 }
 
 .stat-value {
@@ -83,17 +71,13 @@ p {
   font-weight: 700;
 }
 
-.section-title {
-  font-size: 1.6rem;
-  margin-bottom: 0.55rem;
-}
-
 .dashboard-list {
+  margin-top: 0.6rem;
   display: grid;
   gap: 0.7rem;
 }
 
-.pipeline-row {
+.status-card {
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -101,40 +85,38 @@ p {
 }
 
 .pipeline-name {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .muted {
-  margin-top: 0.15rem;
-  color: #677f89;
+  margin-top: 0.2rem;
+  color: #607d86;
   font-size: 0.9rem;
 }
 
 .status-chip {
-  padding: 0.3rem 0.75rem;
   border-radius: 999px;
-  font-size: 0.85rem;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.9rem;
 }
 
 .failed {
-  background: #ffe5e5;
-  color: #ba1b1b;
+  background: #ffe4e4;
+  color: #a11919;
 }
 
 .success {
-  background: #e8fce8;
+  background: #e8ffe8;
   color: #166c23;
 }
 
 .error-text {
-  color: #ba1b1b;
-}
-
-.root-cause {
   margin-top: 0.3rem;
+  color: #b41b1b;
 }
 
 .fix-text {
+  margin-top: 0.4rem;
   color: #166c23;
 }
 
@@ -143,10 +125,6 @@ p {
 }
 
 @media (max-width: 900px) {
-  .dashboard-page {
-    padding: 1rem;
-  }
-
   .stats-grid {
     grid-template-columns: 1fr;
   }
