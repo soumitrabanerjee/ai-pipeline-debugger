@@ -1,0 +1,23 @@
+openapi: 3.0.3
+info:
+  title: AI Pipeline Debugger API
+  version: 0.1.0
+paths:
+  /incidents:
+    get:
+      summary: List incidents
+      responses:
+        '200':
+          description: OK
+  /incidents/{incident_id}:
+    get:
+      summary: Get incident detail
+      parameters:
+        - in: path
+          name: incident_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
