@@ -4,23 +4,48 @@
   background: #f4f8fb;
 }
 
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
 }
 
-.page {
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+.dashboard-page {
   max-width: 1100px;
   margin: 0 auto;
   padding: 2rem 1rem 3rem;
+  display: grid;
+  gap: 1.25rem;
 }
 
-.hero h1 {
-  margin-bottom: 0.5rem;
+.search-row {
+  display: flex;
+  gap: 0.5rem;
 }
 
-.hero p {
-  margin-top: 0;
-  color: #3e5963;
+.dashboard-input {
+  flex: 1;
+  border: 1px solid #c9dbe3;
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  font-size: 1rem;
+}
+
+.dashboard-button {
+  border: none;
+  background: #0f4c5c;
+  color: #fff;
+  border-radius: 10px;
+  width: 44px;
+  cursor: pointer;
 }
 
 .card {
@@ -28,58 +53,79 @@ body {
   border-radius: 12px;
   padding: 1rem 1.2rem;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
-  margin-top: 1rem;
 }
 
-.grid {
+.stats-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1rem;
 }
 
-.flow {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.stat-card {
   display: grid;
-  gap: 0.6rem;
+  gap: 0.35rem;
 }
 
-.flow li {
-  padding: 0.65rem 0.8rem;
-  border-left: 4px solid #1f7a8c;
-  background: #eef8fa;
-  border-radius: 8px;
-}
-
-.status-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.status-table th,
-.status-table td {
-  text-align: left;
-  padding: 0.55rem;
-  border-bottom: 1px solid #e2ebf0;
-}
-
-.incident-id {
-  margin: 0;
-  color: #0f4c5c;
+.stat-value {
+  font-size: 1.7rem;
   font-weight: 700;
 }
 
-.recommendation {
-  margin-top: 0.8rem;
-  background: #edf6ff;
-  border-left: 3px solid #0077cc;
-  padding: 0.65rem;
-  border-radius: 6px;
+.dashboard-list {
+  margin-top: 0.6rem;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.status-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.pipeline-name {
+  font-weight: 700;
+}
+
+.muted {
+  margin-top: 0.2rem;
+  color: #607d86;
+  font-size: 0.9rem;
+}
+
+.status-chip {
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.9rem;
+}
+
+.failed {
+  background: #ffe4e4;
+  color: #a11919;
+}
+
+.success {
+  background: #e8ffe8;
+  color: #166c23;
+}
+
+.error-text {
+  margin-top: 0.3rem;
+  color: #b41b1b;
+}
+
+.fix-text {
+  margin-top: 0.4rem;
+  color: #166c23;
+}
+
+.empty-state {
+  color: #607d86;
 }
 
 @media (max-width: 900px) {
-  .grid {
+  .stats-grid {
     grid-template-columns: 1fr;
   }
 }
