@@ -91,9 +91,14 @@ Web Dashboard   Slack Alerts
             ├── App.jsx
             ├── styles.css
             └── components/
-                ├── ArchitectureFlow.jsx
-                ├── PipelineHealthTable.jsx
-                └── IncidentPanel.jsx
+                ├── Dashboard.jsx
+                ├── dashboardData.js
+                ├── icons/
+                │   └── Search.jsx
+                └── ui/
+                    ├── button.jsx
+                    ├── card.jsx
+                    └── input.jsx
 ```
 
 ---
