@@ -19,14 +19,14 @@ export const errors = [
   }
 ]
 
-export function filterDashboardItems(query) {
+export function filterDashboardItems(query, currentPipelines = pipelines, currentErrors = errors) {
   const normalizedQuery = query.trim().toLowerCase()
 
   if (!normalizedQuery) {
-    return { pipelines, errors }
+    return { pipelines: currentPipelines, errors: currentErrors }
   }
 
-  const filteredPipelines = pipelines.filter((pipeline) => {
+  const filteredPipelines = currentPipelines.filter((pipeline) => {
     return (
       pipeline.name.toLowerCase().includes(normalizedQuery) ||
       pipeline.status.toLowerCase().includes(normalizedQuery) ||
@@ -34,7 +34,7 @@ export function filterDashboardItems(query) {
     )
   })
 
-  const filteredErrors = errors.filter((item) => {
+  const filteredErrors = currentErrors.filter((item) => {
     return (
       item.pipeline.toLowerCase().includes(normalizedQuery) ||
       item.error.toLowerCase().includes(normalizedQuery) ||
