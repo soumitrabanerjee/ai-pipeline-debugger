@@ -1,0 +1,12 @@
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/venv
+**/node_modules
+**/.env
+**/pipeline_debugger.db
+**/tests
+**/dist
+**/.git
+**/*.md

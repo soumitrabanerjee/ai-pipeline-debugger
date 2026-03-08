@@ -23,7 +23,6 @@ export default function CreatePipelineForm({ onPipelineCreated }) {
         throw new Error('Failed to create pipeline. Please try again.');
       }
 
-      // Clear form and notify parent component
       setName('');
       setStatus('Success');
       setLastRun('Just now');
@@ -38,26 +37,37 @@ export default function CreatePipelineForm({ onPipelineCreated }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="card" style={{ marginTop: '1rem', display: 'grid', gap: '0.75rem' }}>
-      <h3>Add New Pipeline</h3>
-      {error && <p style={{ color: '#b41b1b' }}>{error}</p>}
+    <form onSubmit={handleSubmit} className="card form-card">
+      <h3 className="form-title">Add New Pipeline</h3>
 
-      <div style={{ display: 'grid', gap: '0.25rem' }}>
-        <label htmlFor="pipeline-name">Pipeline Name</label>
+      {error && (
+        <p className="form-error">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          {error}
+        </p>
+      )}
+
+      <div className="form-group">
+        <label htmlFor="pipeline-name" className="form-label">Pipeline Name</label>
         <input
           id="pipeline-name"
-          className="dashboard-input"
+          className="dashboard-input input-plain"
+          placeholder="e.g. customer_etl"
           value={name}
           onChange={(e) => setName(e.target.value)}
           required
         />
       </div>
 
-      <div style={{ display: 'grid', gap: '0.25rem' }}>
-        <label htmlFor="pipeline-status">Status</label>
+      <div className="form-group">
+        <label htmlFor="pipeline-status" className="form-label">Status</label>
         <select
           id="pipeline-status"
-          className="dashboard-input"
+          className="form-select"
           value={status}
           onChange={(e) => setStatus(e.target.value)}
         >
@@ -66,20 +76,27 @@ export default function CreatePipelineForm({ onPipelineCreated }) {
         </select>
       </div>
 
-      <div style={{ display: 'grid', gap: '0.25rem' }}>
-        <label htmlFor="pipeline-last-run">Last Run</label>
+      <div className="form-group">
+        <label htmlFor="pipeline-last-run" className="form-label">Last Run</label>
         <input
           id="pipeline-last-run"
-          className="dashboard-input"
+          className="dashboard-input input-plain"
+          placeholder="e.g. 5 min ago"
           value={lastRun}
           onChange={(e) => setLastRun(e.target.value)}
           required
         />
       </div>
 
-      <button type="submit" className="dashboard-button" disabled={submitting}>
-        {submitting ? 'Adding...' : 'Add Pipeline'}
-      </button>
+      <div className="form-actions">
+        <button
+          type="submit"
+          className="dashboard-button"
+          disabled={submitting}
+        >
+          {submitting ? 'Adding...' : 'Create Pipeline'}
+        </button>
+      </div>
     </form>
   );
 }

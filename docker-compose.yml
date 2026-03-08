@@ -1,0 +1,131 @@
+services:
+
+  # ── Infrastructure ────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: pipeline_debugger
+      POSTGRES_USER: debugger
+      POSTGRES_PASSWORD: debugger
+    ports:
+      - "5434:5432"   # 5434 on host to avoid conflict with local Homebrew postgres on 5433
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U debugger -d pipeline_debugger"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"   # 6380 on host to avoid conflict with local Redis on 6379
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # NOTE: Ollama runs CPU-only inside Docker on Mac (no Metal acceleration).
+  # For faster inference, keep Ollama running natively on your host and set
+  # OLLAMA_HOST=http://host.docker.internal:11434 in the ai-engine service.
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11435:11434"  # 11435 on host to avoid conflict with local Ollama on 11434
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  # Pulls llama3.1:8b into the ollama volume on first startup (idempotent)
+  model-puller:
+    image: ollama/ollama
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["ollama", "pull", "llama3.1:8b"]
+    restart: "no"
+
+  # ── Backend Services ──────────────────────────────────────────────
+
+  api-layer:
+    build:
+      context: .
+      dockerfile: services/api-layer/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://debugger:debugger@postgres:5432/pipeline_debugger
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ingestion-api:
+    build:
+      context: .
+      dockerfile: services/log-ingestion-api/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://debugger:debugger@postgres:5432/pipeline_debugger
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  ai-engine:
+    build:
+      context: .
+      dockerfile: services/ai-debugging-engine/Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  queue-worker:
+    build:
+      context: .
+      dockerfile: services/queue-worker/Dockerfile
+    environment:
+      - DATABASE_URL=postgresql://debugger:debugger@postgres:5432/pipeline_debugger
+      - REDIS_URL=redis://redis:6379
+      - AI_ENGINE_URL=http://ai-engine:8002/analyze
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ai-engine:
+        condition: service_started
+
+  # ── Frontend ──────────────────────────────────────────────────────
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/web-dashboard/Dockerfile
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api-layer
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:

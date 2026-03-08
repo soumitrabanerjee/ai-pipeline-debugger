@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Pipeline Debugger — Preview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+:root {
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  --bg-page:       #f6f8fa;
+  --bg-card:       #ffffff;
+  --bg-card-hover: #fafbfc;
+  --bg-input:      #ffffff;
+  --bg-header:     rgba(255, 255, 255, 0.82);
+
+  --text:          #0f172a;
+  --text-secondary:#475569;
+  --text-muted:    #94a3b8;
+
+  --border:        #e2e8f0;
+  --border-light:  #f1f5f9;
+
+  --accent:        #6366f1;
+  --accent-hover:  #4f46e5;
+  --accent-subtle: #eef2ff;
+
+  --btn-bg:        #6366f1;
+  --btn-color:     #ffffff;
+  --btn-hover:     #4f46e5;
+  --btn-ghost-hover: #f1f5f9;
+
+  --shadow-xs:     0 1px 2px rgba(0,0,0,0.04);
+  --shadow-sm:     0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md:     0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
+  --shadow-lg:     0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.04);
+  --shadow-modal:  0 25px 50px -12px rgba(0,0,0,0.25);
+  --shadow-glow:   0 0 0 3px rgba(99,102,241,0.15);
+
+  --failed-bg:     #fef2f2;
+  --failed-text:   #dc2626;
+  --failed-border: #fecaca;
+  --success-bg:    #f0fdf4;
+  --success-text:  #16a34a;
+  --success-border:#bbf7d0;
+  --error-text:    #dc2626;
+  --fix-text:      #16a34a;
+
+  --radius-sm:     6px;
+  --radius-md:     10px;
+  --radius-lg:     14px;
+  --radius-xl:     20px;
+  --radius-full:   9999px;
+  --transition:    150ms cubic-bezier(0.4,0,0.2,1);
+}
+
+[data-theme="dark"] {
+  --bg-page:       #0b0f14;
+  --bg-card:       #111827;
+  --bg-card-hover: #1a2234;
+  --bg-input:      #1e293b;
+  --bg-header:     rgba(11,15,20,0.82);
+  --text:          #f1f5f9;
+  --text-secondary:#94a3b8;
+  --text-muted:    #64748b;
+  --border:        #1e293b;
+  --border-light:  #1e293b;
+  --accent:        #818cf8;
+  --accent-hover:  #6366f1;
+  --accent-subtle: rgba(99,102,241,0.12);
+  --btn-bg:        #6366f1;
+  --btn-color:     #ffffff;
+  --btn-hover:     #818cf8;
+  --btn-ghost-hover: #1e293b;
+  --shadow-xs:     0 1px 2px rgba(0,0,0,0.2);
+  --shadow-sm:     0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md:     0 4px 6px -1px rgba(0,0,0,0.3), 0 2px 4px -2px rgba(0,0,0,0.2);
+  --shadow-lg:     0 10px 15px -3px rgba(0,0,0,0.3), 0 4px 6px -4px rgba(0,0,0,0.2);
+  --shadow-modal:  0 25px 50px -12px rgba(0,0,0,0.6);
+  --shadow-glow:   0 0 0 3px rgba(129,140,248,0.2);
+  --failed-bg:     rgba(220,38,38,0.1);
+  --failed-text:   #fca5a5;
+  --failed-border: rgba(220,38,38,0.25);
+  --success-bg:    rgba(22,163,74,0.1);
+  --success-text:  #86efac;
+  --success-border:rgba(22,163,74,0.25);
+  --error-text:    #fca5a5;
+  --fix-text:      #86efac;
+}
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg-page);color:var(--text);line-height:1.6;transition:background var(--transition),color var(--transition)}
+h1,h2,h3,h4,p{margin:0}
+
+.dashboard-page{max-width:1200px;margin:0 auto;padding:0 1.5rem 3rem;display:grid;gap:1.75rem}
+.dashboard-header{position:sticky;top:0;z-index:50;background:var(--bg-header);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:1rem 1.5rem}
+.header-inner{max-width:1200px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:1rem}
+.header-brand{display:flex;align-items:center;gap:0.75rem}
+.header-logo{width:36px;height:36px;background:linear-gradient(135deg,var(--accent) 0%,#a78bfa 100%);border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;color:white;font-weight:800;font-size:0.85rem;flex-shrink:0}
+.header-title{font-size:1.15rem;font-weight:700;letter-spacing:-0.025em;color:var(--text)}
+.header-subtitle{font-size:0.75rem;color:var(--text-muted);font-weight:500;margin-top:-2px}
+.header-actions{display:flex;align-items:center;gap:0.5rem}
+
+.dashboard-button{display:inline-flex;align-items:center;justify-content:center;gap:0.5rem;border:none;background:var(--btn-bg);color:var(--btn-color);border-radius:var(--radius-md);padding:0.6rem 1.15rem;font-size:0.875rem;font-weight:600;cursor:pointer;transition:all var(--transition);white-space:nowrap;line-height:1.4;font-family:inherit}
+.dashboard-button:hover{background:var(--btn-hover);box-shadow:var(--shadow-md);transform:translateY(-1px)}
+.btn-ghost{background:transparent;color:var(--text-secondary);border:1px solid var(--border)}
+.btn-ghost:hover{background:var(--btn-ghost-hover);color:var(--text);box-shadow:var(--shadow-sm)}
+
+.theme-toggle{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);background:var(--bg-card);color:var(--text-secondary);border-radius:var(--radius-md);cursor:pointer;font-size:1.1rem;transition:all var(--transition)}
+.theme-toggle:hover{background:var(--accent-subtle);border-color:var(--accent);color:var(--accent)}
+
+.search-row{display:flex;gap:0.5rem;align-items:stretch}
+.search-wrapper{flex:1;position:relative;display:flex;align-items:center}
+.search-icon{position:absolute;left:0.85rem;color:var(--text-muted);pointer-events:none;display:flex}
+.dashboard-input{width:100%;border:1px solid var(--border);border-radius:var(--radius-md);padding:0.625rem 0.85rem 0.625rem 2.5rem;font-size:0.9rem;font-family:inherit;background:var(--bg-input);color:var(--text);transition:all var(--transition);outline:none}
+.dashboard-input:focus{border-color:var(--accent);box-shadow:var(--shadow-glow)}
+.dashboard-input::placeholder{color:var(--text-muted)}
+
+.card{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:1.25rem;box-shadow:var(--shadow-xs);transition:all var(--transition)}
+
+.stats-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem}
+.stat-card{position:relative;overflow:hidden;display:flex;flex-direction:column;gap:0.5rem}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:var(--radius-lg) var(--radius-lg) 0 0}
+.stat-card:nth-child(1)::before{background:linear-gradient(90deg,#6366f1,#818cf8)}
+.stat-card:nth-child(2)::before{background:linear-gradient(90deg,#ef4444,#f87171)}
+.stat-card:nth-child(3)::before{background:linear-gradient(90deg,#10b981,#34d399)}
+.stat-label{font-size:0.78rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted)}
+.stat-value{font-size:2rem;font-weight:800;letter-spacing:-0.03em;line-height:1.1;color:var(--text)}
+.stat-sub{font-size:0.78rem;color:var(--text-muted)}
+
+.section-header{display:flex;align-items:center;justify-content:space-between;gap:1rem}
+.section-title{font-size:1.05rem;font-weight:700;letter-spacing:-0.015em;color:var(--text)}
+.section-badge{display:inline-flex;align-items:center;justify-content:center;min-width:1.5rem;height:1.5rem;padding:0 0.4rem;border-radius:var(--radius-full);font-size:0.75rem;font-weight:700;background:var(--accent-subtle);color:var(--accent)}
+
+.dashboard-list{display:grid;gap:0.625rem}
+.status-card{display:flex;justify-content:space-between;align-items:center;gap:1rem;cursor:pointer}
+.status-card:hover{border-color:var(--accent);box-shadow:var(--shadow-md);transform:translateY(-1px);background:var(--bg-card-hover)}
+.pipeline-info{display:flex;flex-direction:column;gap:0.2rem;min-width:0}
+.pipeline-name{font-weight:600;font-size:0.95rem;color:var(--text)}
+.muted{color:var(--text-muted);font-size:0.8rem}
+
+.status-chip{display:inline-flex;align-items:center;gap:0.35rem;border-radius:var(--radius-full);padding:0.3rem 0.75rem;font-size:0.78rem;font-weight:600;white-space:nowrap;flex-shrink:0}
+.status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.failed{background:var(--failed-bg);color:var(--failed-text);border:1px solid var(--failed-border)}
+.failed .status-dot{background:var(--failed-text)}
+.success{background:var(--success-bg);color:var(--success-text);border:1px solid var(--success-border)}
+.success .status-dot{background:var(--success-text)}
+
+.error-label{display:inline-flex;align-items:center;gap:0.35rem;color:var(--error-text);font-weight:600;font-size:0.88rem}
+.error-detail{color:var(--text-secondary);font-size:0.88rem;line-height:1.6}
+.fix-block{background:var(--success-bg);border:1px solid var(--success-border);border-radius:var(--radius-md);padding:0.65rem 0.85rem;color:var(--success-text);font-size:0.85rem;font-weight:500;display:flex;align-items:flex-start;gap:0.5rem;line-height:1.5}
+.fix-icon{flex-shrink:0;margin-top:2px}
+
+.analysis-card{display:grid;gap:0.65rem}
+.analysis-card .pipeline-name{font-size:0.8rem;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--accent)}
+
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+.live-dot{width:8px;height:8px;background:#10b981;border-radius:50%;animation:pulse 2s ease-in-out infinite}
+
+@media(max-width:900px){.stats-grid{grid-template-columns:1fr}.header-subtitle{display:none}}
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="dashboard-header">
+    <div class="header-inner">
+      <div class="header-brand">
+        <div class="header-logo">AI</div>
+        <div>
+          <div class="header-title">Pipeline Debugger</div>
+          <div class="header-subtitle">AI-Powered Root Cause Analysis</div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div class="live-dot" title="Live"></div>
+        <button class="theme-toggle" onclick="document.body.toggleAttribute('data-theme'); this.textContent = document.body.hasAttribute('data-theme') ? '\u2600\uFE0F' : '\uD83C\uDF19'">\uD83C\uDF19</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <main class="dashboard-page">
+
+    <!-- Search -->
+    <div class="search-row">
+      <div class="search-wrapper">
+        <span class="search-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        </span>
+        <input class="dashboard-input" placeholder="Search pipelines, errors, fixes..." />
+      </div>
+      <button class="dashboard-button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Add Pipeline
+      </button>
+    </div>
+
+    <!-- Stats -->
+    <section class="stats-grid">
+      <article class="card stat-card">
+        <p class="stat-label">Total Pipelines</p>
+        <p class="stat-value">3</p>
+        <p class="stat-sub">Across all workspaces</p>
+      </article>
+      <article class="card stat-card">
+        <p class="stat-label">Failures Today</p>
+        <p class="stat-value">2</p>
+        <p class="stat-sub">Requires attention</p>
+      </article>
+      <article class="card stat-card">
+        <p class="stat-label">Avg. Resolution</p>
+        <p class="stat-value">12 min</p>
+        <p class="stat-sub">Mean time to repair</p>
+      </article>
+    </section>
+
+    <!-- Pipeline Status -->
+    <section>
+      <div class="section-header">
+        <h2 class="section-title">Pipeline Status</h2>
+        <span class="section-badge">3</span>
+      </div>
+      <div class="dashboard-list" style="margin-top:0.75rem">
+        <article class="card status-card">
+          <div class="pipeline-info">
+            <p class="pipeline-name">customer_etl</p>
+            <p class="muted">Last run: 2 min ago</p>
+          </div>
+          <span class="status-chip failed"><span class="status-dot"></span>Failed</span>
+        </article>
+        <article class="card status-card">
+          <div class="pipeline-info">
+            <p class="pipeline-name">billing_pipeline</p>
+            <p class="muted">Last run: 10 min ago</p>
+          </div>
+          <span class="status-chip success"><span class="status-dot"></span>Success</span>
+        </article>
+        <article class="card status-card">
+          <div class="pipeline-info">
+            <p class="pipeline-name">analytics_daily</p>
+            <p class="muted">Last run: 30 min ago</p>
+          </div>
+          <span class="status-chip failed"><span class="status-dot"></span>Failed</span>
+        </article>
+      </div>
+    </section>
+
+    <!-- AI Root Cause -->
+    <section>
+      <div class="section-header">
+        <h2 class="section-title">AI Root Cause Analysis</h2>
+        <span class="section-badge">2</span>
+      </div>
+      <div class="dashboard-list" style="margin-top:0.75rem">
+        <article class="card analysis-card">
+          <p class="pipeline-name">customer_etl</p>
+          <p class="error-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            ExecutorLostFailure
+          </p>
+          <p class="error-detail">Spark executor memory exceeded</p>
+          <div class="fix-block">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="fix-icon"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>
+            <span>Increase spark.executor.memory to 8g</span>
+          </div>
+        </article>
+        <article class="card analysis-card">
+          <p class="pipeline-name">analytics_daily</p>
+          <p class="error-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            SchemaMismatch
+          </p>
+          <p class="error-detail">Column type mismatch in parquet</p>
+          <div class="fix-block">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="fix-icon"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/></svg>
+            <span>Update schema or cast column types</span>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // Toggle dark mode attribute for the preview
+    document.querySelector('.theme-toggle').addEventListener('click', function() {
+      const isDark = document.body.getAttribute('data-theme') === 'dark';
+      if (isDark) {
+        document.body.removeAttribute('data-theme');
+        this.textContent = '\uD83C\uDF19';
+      } else {
+        document.body.setAttribute('data-theme', 'dark');
+        this.textContent = '\u2600\uFE0F';
+      }
+    });
+  </script>
+</body>
+</html>
