@@ -8,6 +8,12 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [showCreateForm, setShowCreateForm] = useState(false)
+  const [selectedPipeline, setSelectedPipeline] = useState(null)
+  const [pipelineErrors, setPipelineErrors] = useState([])
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [darkMode, setDarkMode] = useState(() => {
+    return localStorage.getItem('theme') === 'dark'
+  })
 
   const fetchData = async (isInitial = false) => {
     if (isInitial) setLoading(true)
@@ -48,6 +54,41 @@ export default function Dashboard() {
     fetchData(false)
   }
 
+  const handlePipelineClick = async (pipeline) => {
+    setSelectedPipeline(pipeline)
+    setDetailLoading(true)
+    try {
+      const response = await fetch(`http://localhost:8001/pipelines/${encodeURIComponent(pipeline.name)}/errors`)
+      if (!response.ok) throw new Error('Failed to fetch pipeline errors')
+      const errors = await response.json()
+      setPipelineErrors(errors)
+    } catch (err) {
+      console.error(err)
+      setPipelineErrors([])
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  const handleCloseDetail = () => {
+    setSelectedPipeline(null)
+    setPipelineErrors([])
+  }
+
+  const toggleDarkMode = () => {
+    setDarkMode((prev) => {
+      const next = !prev
+      document.body.setAttribute('data-theme', next ? 'dark' : '')
+      localStorage.setItem('theme', next ? 'dark' : 'light')
+      return next
+    })
+  }
+
+  // Apply saved theme on first render
+  useEffect(() => {
+    document.body.setAttribute('data-theme', darkMode ? 'dark' : '')
+  }, [])
+
   const filteredItems = useMemo(
     () => filterDashboardItems(query, data.pipelines, data.errors),
     [query, data]
@@ -57,6 +98,38 @@ export default function Dashboard() {
   if (error && !data.pipelines.length) return <div className="dashboard-page">Error: {error}</div>
 
   return (
+    <>
+    {selectedPipeline && (
+      <div className="modal-overlay" onClick={handleCloseDetail}>
+        <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <h2>{selectedPipeline.name}</h2>
+            <button className="modal-close" onClick={handleCloseDetail}>✕</button>
+          </div>
+          <p className="muted">Last run: {selectedPipeline.lastRun} &nbsp;|&nbsp;
+            <span className={selectedPipeline.status === 'Failed' ? 'status-chip failed' : 'status-chip success'}>
+              {selectedPipeline.status}
+            </span>
+          </p>
+          <h3>Error History</h3>
+          {detailLoading ? (
+            <p>Loading errors...</p>
+          ) : pipelineErrors.length === 0 ? (
+            <p className="empty-state">No errors recorded for this pipeline.</p>
+          ) : (
+            <div className="dashboard-list">
+              {pipelineErrors.map((item, i) => (
+                <article key={i} className="card">
+                  <p className="error-text">Error: {item.error}</p>
+                  <p>Root Cause: {item.rootCause}</p>
+                  <p className="fix-text">Suggested Fix: {item.fix}</p>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    )}
     <main className="dashboard-page">
       <h1>AI Data Pipeline Debugger</h1>
 
@@ -78,6 +151,15 @@ export default function Dashboard() {
           onClick={() => setShowCreateForm(!showCreateForm)}
         >
           {showCreateForm ? 'Cancel' : 'Add Pipeline'}
+        </button>
+        <button
+          type="button"
+          className="theme-toggle"
+          aria-label="Toggle dark mode"
+          onClick={toggleDarkMode}
+          title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {darkMode ? '☀️' : '🌙'}
         </button>
       </div>
 
@@ -108,7 +190,12 @@ export default function Dashboard() {
         <h2>Pipeline Status</h2>
         <div className="dashboard-list">
           {filteredItems.pipelines.map((pipeline) => (
-            <article key={pipeline.name} className="card status-card">
+            <article
+              key={pipeline.name}
+              className="card status-card clickable"
+              onClick={() => handlePipelineClick(pipeline)}
+              title="Click to view error history"
+            >
               <div>
                 <p className="pipeline-name">{pipeline.name}</p>
                 <p className="muted">Last run: {pipeline.lastRun}</p>
@@ -145,5 +232,6 @@ export default function Dashboard() {
         </div>
       </section>
     </main>
+    </>
   )
 }

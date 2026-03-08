@@ -14,7 +14,7 @@ source venv/bin/activate
 
 # Install dependencies if not already installed
 echo "Installing dependencies..."
-pip install fastapi uvicorn sqlalchemy
+pip install fastapi uvicorn sqlalchemy psycopg2-binary
 
 # Run the server
 echo "Starting API Layer server..."

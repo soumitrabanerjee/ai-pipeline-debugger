@@ -14,7 +14,7 @@ source venv/bin/activate
 
 # Install dependencies if not already installed
 echo "Installing dependencies..."
-pip install fastapi uvicorn sqlalchemy requests
+pip install fastapi uvicorn sqlalchemy psycopg2-binary requests redis
 
 # Run the server on port 8000
 echo "Starting Ingestion API server..."

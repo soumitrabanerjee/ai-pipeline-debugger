@@ -1,7 +1,47 @@
 :root {
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  color: #102027;
-  background: #f4f8fb;
+
+  /* Light theme tokens */
+  --bg-page:    #f4f8fb;
+  --bg-card:    #ffffff;
+  --bg-input:   #ffffff;
+  --text:       #102027;
+  --text-muted: #607d86;
+  --border:     #c9dbe3;
+  --btn-bg:     #0f4c5c;
+  --btn-color:  #ffffff;
+  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.06);
+  --shadow-hover: 0 4px 20px rgba(0, 0, 0, 0.12);
+  --shadow-modal: 0 8px 40px rgba(0, 0, 0, 0.18);
+
+  /* Status chips */
+  --failed-bg:   #ffe4e4;
+  --failed-text: #a11919;
+  --success-bg:  #e8ffe8;
+  --success-text:#166c23;
+  --error-text:  #b41b1b;
+  --fix-text:    #166c23;
+}
+
+[data-theme="dark"] {
+  --bg-page:    #0e1418;
+  --bg-card:    #1a2228;
+  --bg-input:   #1a2228;
+  --text:       #e2eaed;
+  --text-muted: #7fa8b5;
+  --border:     #2a3d47;
+  --btn-bg:     #1b6f87;
+  --btn-color:  #ffffff;
+  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.3);
+  --shadow-hover: 0 4px 20px rgba(0, 0, 0, 0.45);
+  --shadow-modal: 0 8px 40px rgba(0, 0, 0, 0.55);
+
+  --failed-bg:   #3b1414;
+  --failed-text: #ff8080;
+  --success-bg:  #0e2d14;
+  --success-text:#6fd98a;
+  --error-text:  #ff8080;
+  --fix-text:    #6fd98a;
 }
 
 * {
@@ -10,6 +50,9 @@
 
 body {
   margin: 0;
+  background: var(--bg-page);
+  color: var(--text);
+  transition: background 0.2s, color 0.2s;
 }
 
 h1,
@@ -33,26 +76,52 @@ p {
 
 .dashboard-input {
   flex: 1;
-  border: 1px solid #c9dbe3;
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 0.65rem 0.75rem;
   font-size: 1rem;
+  background: var(--bg-input);
+  color: var(--text);
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
 }
 
 .dashboard-button {
   border: none;
-  background: #0f4c5c;
-  color: #fff;
+  background: var(--btn-bg);
+  color: var(--btn-color);
   border-radius: 10px;
   width: 44px;
   cursor: pointer;
+  transition: background 0.2s;
+}
+
+/* Dark mode toggle button */
+.theme-toggle {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  border-radius: 10px;
+  width: 44px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.theme-toggle:hover {
+  background: var(--btn-bg);
+  color: var(--btn-color);
+  border-color: var(--btn-bg);
 }
 
 .card {
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 12px;
   padding: 1rem 1.2rem;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  box-shadow: var(--shadow-card);
+  transition: background 0.2s, box-shadow 0.2s;
 }
 
 .stats-grid {
@@ -90,7 +159,7 @@ p {
 
 .muted {
   margin-top: 0.2rem;
-  color: #607d86;
+  color: var(--text-muted);
   font-size: 0.9rem;
 }
 
@@ -101,27 +170,83 @@ p {
 }
 
 .failed {
-  background: #ffe4e4;
-  color: #a11919;
+  background: var(--failed-bg);
+  color: var(--failed-text);
 }
 
 .success {
-  background: #e8ffe8;
-  color: #166c23;
+  background: var(--success-bg);
+  color: var(--success-text);
 }
 
 .error-text {
   margin-top: 0.3rem;
-  color: #b41b1b;
+  color: var(--error-text);
 }
 
 .fix-text {
   margin-top: 0.4rem;
-  color: #166c23;
+  color: var(--fix-text);
 }
 
 .empty-state {
-  color: #607d86;
+  color: var(--text-muted);
+}
+
+.clickable {
+  cursor: pointer;
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+
+.clickable:hover {
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-1px);
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
+}
+
+.modal-content {
+  background: var(--bg-card);
+  color: var(--text);
+  border-radius: 16px;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 640px;
+  max-height: 80vh;
+  overflow-y: auto;
+  display: grid;
+  gap: 0.75rem;
+  box-shadow: var(--shadow-modal);
+  transition: background 0.2s;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0 0.25rem;
+}
+
+.modal-close:hover {
+  color: var(--text);
 }
 
 @media (max-width: 900px) {
