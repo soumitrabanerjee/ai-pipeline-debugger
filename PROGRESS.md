@@ -2,100 +2,109 @@
 
 ## Current Status (As of March 8, 2026)
 
-The project is a functional full-stack application with a React frontend, three FastAPI backend services, and a **live AI Debugging Engine powered by local Llama 3.1 via Ollama**.
+Full-stack application: React frontend, four FastAPI backend services, Redis async queue, PostgreSQL, Slack alerting, and a **live Log Collection Layer** that watches real log files and accepts webhook pushes from Airflow/Spark/Databricks.
+
+**160 tests passing.**
 
 ---
 
-## Architecture
+## Architecture — Built vs Planned
 
 ```
-Frontend (React/Vite)  :5173
-        |
-API Layer (FastAPI)    :8001  ──── PostgreSQL :5433 (pipeline_debugger)
-        |                               |
-Log Ingestion API      :8000  ──────────┘
-        |
-AI Debugging Engine    :8002
-        |
-Ollama (llama3.1:8b)   :11434
+Customer Pipelines (Airflow / Spark / Databricks)
+          │
+          ▼
+Log Collection Layer          ✅ BUILT
+(agent.py + webhook_collector.py + simulator.py)
+          │
+          ▼
+Log Ingestion API             ✅ BUILT
+(FastAPI :8000 — normalises, writes PipelineRun, publishes to Redis)
+          │
+          ▼
+Message Queue                 ✅ BUILT
+(Redis Streams — log_events stream, consumer group)
+          │
+          ▼
+Log Storage                   ⚠️  PARTIAL
+(PostgreSQL for metadata ✅ / raw log files = NOT stored)
+          │
+          ▼
+Log Processing Layer          ⚠️  PARTIAL
+(parser.py exists ✅ / NOT wired into the live worker pipeline)
+          │
+          ▼
+AI Debugging Engine           ✅ BUILT
+(FastAPI :8002 → Ollama llama3.1:8b — RAG prompt stub only)
+          │
+          ▼
+Root Cause Engine             ⚠️  STUB
+(rank_hypotheses() sorts by score — not wired to AI output)
+          │
+          ▼
+API Layer                     ✅ BUILT
+(FastAPI :8001 — /dashboard, /pipelines/{n}/errors, /pipelines/{n}/runs)
+          │
+     ┌────┴──────┐
+     ▼            ▼
+Web Dashboard    Slack Alerts
+✅ BUILT         ✅ BUILT
+(React/Vite      (alerter.py —
+ dark mode,       Slack webhook,
+ modal,           fires after
+ run history)     AI analysis)
 ```
 
 ---
 
-## Components
+## Service Map
 
-### 1. Frontend (Web Dashboard)
-- **Location**: `frontend/web-dashboard`
-- **Tech**: React, Vite
-- **Status**: Running on `http://localhost:5173`
-- **Features**:
-  - Displays pipelines and their statuses
-  - Displays AI-generated root causes and fixes per error
-  - "Add Pipeline" form for dynamic pipeline creation
-  - Auto-refresh every 5 seconds for live updates
-- **Data Source**: `http://localhost:8001/dashboard`
-
-### 2. API Layer
-- **Location**: `services/api-layer`
-- **Tech**: FastAPI, SQLAlchemy, PostgreSQL
-- **Status**: Running on `http://localhost:8001`
-- **Database**: PostgreSQL at `localhost:5433/pipeline_debugger`
-- **Endpoints**:
-  - `GET /dashboard` — Returns all pipelines and errors
-  - `POST /pipelines` — Creates a new pipeline
-  - `GET /health`
-
-### 3. Log Ingestion API
-- **Location**: `services/log-ingestion-api`
-- **Tech**: FastAPI, SQLAlchemy
-- **Status**: Running on `http://localhost:8000`
-- **Database**: Shares PostgreSQL `pipeline_debugger` with API Layer
-- **Endpoints**:
-  - `POST /ingest` — Accepts log events, updates pipeline status, triggers AI analysis
-  - `GET /health`
-- **AI call timeout**: 120 seconds (increased from 5s to give Ollama time to respond)
-
-### 4. AI Debugging Engine
-- **Location**: `services/ai-debugging-engine`
-- **Tech**: FastAPI, Ollama (requests)
-- **Status**: Running on `http://localhost:8002`
-- **Model**: `llama3.1:8b` via local Ollama (`http://localhost:11434`)
-- **Endpoints**:
-  - `POST /analyze` — Returns root cause, suggested fix, confidence score
-  - `GET /health`
-
-### 5. Shared Models
-- **Location**: `services/shared/models.py`
-- **Content**: SQLAlchemy ORM models (`Pipeline`, `Error`)
-- **Usage**: Imported by both API Layer and Log Ingestion API
+| Service | Port | Status | Tech |
+|---|---|---|---|
+| Frontend | 5173 | ✅ Running | React + Vite |
+| API Layer | 8001 | ✅ Running | FastAPI + PostgreSQL |
+| Log Ingestion API | 8000 | ✅ Running | FastAPI + Redis |
+| AI Debugging Engine | 8002 | ✅ Running | FastAPI + Ollama |
+| Queue Worker | — | ✅ Running | Python + Redis Streams |
+| Webhook Collector | 8003 | ✅ Built, not started | FastAPI |
+| Log Agent | — | ✅ Built, not started | watchdog |
+| PostgreSQL | 5433 | ✅ Running | Homebrew pg16 |
+| Redis | 6379 | ✅ Running | Homebrew |
+| Ollama | 11434 | ✅ Running | llama3.1:8b |
 
 ---
 
 ## How to Run
 
-### Start all services (separate terminals):
-
 ```bash
-# 1. API Layer (port 8001)
-/bin/zsh frontend/web-dashboard/src/components/start_api_layer.sh
+# Infrastructure
+brew services start postgresql@16
+brew services start redis
+ollama serve &
 
-# 2. Log Ingestion API (port 8000)
-/bin/zsh frontend/web-dashboard/src/components/start_ingestion.sh
+# Backend services (separate terminals)
+/bin/zsh frontend/web-dashboard/src/components/start_api_layer.sh     # :8001
+/bin/zsh frontend/web-dashboard/src/components/start_ingestion.sh     # :8000
+/bin/zsh frontend/web-dashboard/src/components/start_ai_engine.sh     # :8002
+/bin/zsh frontend/web-dashboard/src/components/start_worker.sh        # queue worker
 
-# 3. AI Debugging Engine (port 8002) — requires Ollama running
-/bin/zsh frontend/web-dashboard/src/components/start_ai_engine.sh
+# Frontend
+cd frontend/web-dashboard && npm run dev                               # :5173
 
-# 4. Frontend (port 5173)
-cd frontend/web-dashboard && npm run dev
-```
+# Log Collection (optional — picks up real log files)
+python services/log-collection-layer/agent.py \
+  --watch-dir /tmp/pipeline-logs --job-id spark-etl-prod
 
-### Send a test log event:
-```bash
-./frontend/web-dashboard/new_run.sh
-```
+# Generate test logs (drives the agent)
+python services/log-collection-layer/simulator.py \
+  --type spark --job-id spark-etl-prod --errors 2
 
-### Run tests:
-```bash
+# Webhook push (Airflow-style)
+curl -X POST http://localhost:8003/webhook/airflow \
+  -H 'Content-Type: application/json' \
+  -d '{"dag_id":"my-dag","run_id":"run-001","exception":"OOM error"}'
+
+# Run all tests
 python3 -m pytest tests/ -v
 ```
 
@@ -103,50 +112,66 @@ python3 -m pytest tests/ -v
 
 ## Completed Work
 
-- [x] React dashboard with live auto-refresh (5s polling)
-- [x] "Add Pipeline" form persisted to SQLite
-- [x] Log ingestion API writing pipeline status + errors to DB
-- [x] Migrated from SQLite to PostgreSQL 16 (Homebrew, port 5433)
-  - Installed: `postgresql@16` via Homebrew
-  - Installed: `psycopg2-binary` in api-layer and log-ingestion-api venvs
-  - DB: `postgresql://debugger:debugger@localhost:5433/pipeline_debugger`
-  - Both services now read `DATABASE_URL` from env var (falls back to above)
-- [x] AI Debugging Engine integrated with real Llama 3.1:8b via Ollama
-- [x] Fixed 5-second timeout bug in ingestion → AI call (now 120s)
-- [x] Fixed `ollama serve` blocking bug in `new_run.sh` (now runs in background)
-- [x] Pipeline detail view — click any pipeline card to open a modal with its full error history
-  - New `GET /pipelines/{name}/errors` endpoint in the API layer
-  - Modal overlays the dashboard; closes by clicking backdrop or ✕ button
-- [x] Dark mode toggle — 🌙/☀️ button, CSS custom properties, persists via localStorage
-- [x] **Redis queue (async AI analysis)**
-  - Ingestion API now publishes ERROR events to a Redis Stream (`log_events`) and returns 202 immediately — no more blocking on AI
-  - New `services/queue-worker/worker.py` — consumer group reads from stream, calls AI engine, writes Error to DB
-  - Start script: `frontend/web-dashboard/src/components/start_worker.sh`
-  - Redis installed via Homebrew (v8.6.1), running on port 6379
-- [x] 76 passing test cases across all services (unit + API + integration)
-  - `tests/test_parser.py` — 10 tests
-  - `tests/test_root_cause_engine.py` — 7 tests
-  - `tests/test_rag_pipeline.py` — 7 tests
-  - `tests/test_ai_engine.py` — 10 tests (Ollama mocked)
-  - `tests/test_ingestion_api.py` — 12 tests (Redis mocked, verifies queue publish behaviour)
-  - `tests/test_api_layer.py` — 17 tests (in-memory SQLite)
-  - `tests/test_worker.py` — 18 tests (AI + DB mocked, covers process_event, deduplication, consumer group)
+- [x] React dashboard — live auto-refresh, "Add Pipeline" form, dark mode toggle, pipeline detail modal
+- [x] PostgreSQL migration (port 5433, shared across api-layer + ingestion-api)
+- [x] AI Debugging Engine — Llama 3.1:8b via Ollama, structured JSON output
+- [x] **Redis Queue** — ingestion returns 202 immediately; worker processes async
+  - Redis Streams (`log_events`), consumer group `debugger_workers`
+  - Error deduplication — upsert by `(pipeline_name, error_type)`
+- [x] **Pipeline Run History** — `PipelineRun` table, `GET /pipelines/{name}/runs` (newest-first)
+- [x] **Slack Alerting** — Block Kit messages after AI analysis; silent no-op if no webhook URL set
+- [x] **Log Collection Layer** — three ingestion paths:
+  - `agent.py` — watchdog file-watcher; tails `.log`/`.txt` files; only forwards ERROR lines; position-aware (no re-reads)
+  - `webhook_collector.py` — FastAPI :8003; `/webhook/airflow` + `/webhook/generic`
+  - `simulator.py` — generates realistic Spark/Airflow/dbt logs for local dev/demo
+  - `log_parser.py` — parses Airflow `[ts] {module} LEVEL - msg` and Spark `ts LEVEL msg` formats; normalises timestamps to ISO-8601 UTC
+- [x] Fixed all deprecation warnings (`declarative_base`, `on_event`)
+- [x] Docker Compose file — all 8 services, healthchecks, named volumes (needs Docker Desktop to run)
+- [x] **160 passing tests**
+  - `test_log_collection.py` — 46 tests (parser, agent, file tailer, webhook endpoints)
+  - `test_alerter.py` — 16 tests
+  - `test_pipeline_runs_api.py` — 10 tests
+  - `test_ingestion_api.py` — 19 tests
+  - `test_api_layer.py` — 17 tests
+  - `test_worker.py` — 17 tests
+  - `test_ai_engine.py` — 10 tests
+  - `test_parser.py` — 10 tests
+  - `test_root_cause_engine.py` — 7 tests
+  - `test_rag_pipeline.py` — 7 tests
+
+---
+
+## Architecture Gaps (What's Missing vs Plan)
+
+| Architecture Layer | Status | Gap |
+|---|---|---|
+| Customer Platforms | — | Out of scope (customer-side) |
+| Log Collection Layer | ✅ Built | — |
+| Log Ingestion API | ✅ Built | — |
+| Message Queue | ✅ Built | — |
+| **Log Storage (raw logs)** | ❌ Missing | Raw log text not stored anywhere; only metadata in PostgreSQL. Architecture calls for S3/MinIO. |
+| **Log Processing Layer** | ⚠️ Partial | `parser.py` exists and is tested but **not wired into the worker**. Worker still does a naive `message.split(":")` instead of using `extract_error()`. |
+| AI Debugging Engine | ✅ Built | Prompt is basic — no RAG / vector retrieval yet |
+| **Root Cause Engine** | ⚠️ Stub | `rank_hypotheses()` sorts by score but is never called; AI result goes straight to DB |
+| API Layer | ✅ Built | — |
+| Web Dashboard | ✅ Built | Run history tab not shown in modal yet |
+| Slack Alerts | ✅ Built | — |
+| **RAG / Vector DB** | ❌ Missing | Architecture calls for embedding + similarity search (pgvector/Qdrant). Currently LLM gets raw message only. |
 
 ---
 
 ## Known Issues / Technical Debt
 
-- ~~**Error deduplication**~~ — fixed; worker now upserts by `(pipeline_name, error_type)`
-- **Deprecated SQLAlchemy API**: `declarative_base()` in `shared/models.py` should move to `sqlalchemy.orm.declarative_base()`
-- **Deprecated FastAPI event**: `@app.on_event("startup")` in `api-layer/main.py` should be replaced with a `lifespan` context manager
-- **Port 5432 conflict**: An older PostgreSQL installation exists at `/Library/PostgreSQL/16`. Homebrew PostgreSQL runs on port **5433** to avoid conflict. The older installation's password is unknown — do not remove it.
+- **Port 5432 conflict** — older PostgreSQL at `/Library/PostgreSQL/16`; Homebrew pg on 5433
+- **Docker Desktop not installed** — compose file is written but cannot be built/run yet
+- **Webhook collector not auto-started** — needs a start script like the other services
 
 ---
 
-## Next Steps (To-Do)
+## Next Steps (Priority Order)
 
-1. **Docker Compose**
-   - Wrap all services + Ollama in `docker-compose.yml` so the full stack starts with one command
-
-3. **Fix deprecation warnings**
-   - Update `shared/models.py` and `api-layer/main.py` as noted above
+1. **Wire Log Processing Layer into worker** — replace naive `split(":")` with `extract_error()` from `log-processing-layer/parser.py`; pass `severity` + `summary` to AI prompt for richer analysis
+2. **RAG / Vector DB** — install `pgvector`, store error embeddings, retrieve similar past failures to ground the LLM prompt (highest AI quality improvement)
+3. **Run History UI** — show `GET /pipelines/{name}/runs` in the pipeline detail modal
+4. **Log Storage (raw)** — store raw log text to PostgreSQL `logs_metadata` table (skip S3 for MVP; add later)
+5. **Root Cause Engine integration** — use `rank_hypotheses()` to score + rank AI output before saving

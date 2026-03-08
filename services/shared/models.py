@@ -12,6 +12,15 @@ class Pipeline(Base):
     status = Column(String)
     last_run = Column(String)
 
+class PipelineRun(Base):
+    """Tracks every individual execution of a pipeline."""
+    __tablename__ = "pipeline_runs"
+    id = Column(Integer, primary_key=True, index=True)
+    pipeline_name = Column(String, index=True)
+    run_id = Column(String, unique=True, index=True)
+    status = Column(String)       # "Failed" | "Success"
+    created_at = Column(String)   # ISO-8601 timestamp from the log event
+
 class Error(Base):
     """Represents a specific error event from a pipeline run."""
     __tablename__ = "errors"

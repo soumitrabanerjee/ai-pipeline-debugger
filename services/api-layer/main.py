@@ -15,7 +15,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 sys.path.append(PROJECT_ROOT)
 
 # Now we can import from the shared module
-from services.shared.models import Base, Pipeline, Error
+from services.shared.models import Base, Pipeline, PipelineRun, Error
 
 # Database Configuration
 DATABASE_URL = os.getenv(
@@ -41,6 +41,11 @@ class ErrorItem(BaseModel):
     error: str
     rootCause: str
     fix: str
+
+class RunItem(BaseModel):
+    runId: str
+    status: str
+    createdAt: str
 
 class DashboardData(BaseModel):
     pipelines: List[PipelineStatus]
@@ -110,6 +115,19 @@ def get_pipeline_errors(pipeline_name: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Pipeline '{pipeline_name}' not found")
     errors = db.query(Error).filter(Error.pipeline_name == pipeline_name).all()
     return [{"pipeline": e.pipeline_name, "error": e.error_type, "rootCause": e.root_cause, "fix": e.fix} for e in errors]
+
+@app.get("/pipelines/{pipeline_name}/runs", response_model=List[RunItem])
+def get_pipeline_runs(pipeline_name: str, db: Session = Depends(get_db)):
+    pipeline = db.query(Pipeline).filter(Pipeline.name == pipeline_name).first()
+    if not pipeline:
+        raise HTTPException(status_code=404, detail=f"Pipeline '{pipeline_name}' not found")
+    runs = (
+        db.query(PipelineRun)
+        .filter(PipelineRun.pipeline_name == pipeline_name)
+        .order_by(PipelineRun.created_at.desc())
+        .all()
+    )
+    return [{"runId": r.run_id, "status": r.status, "createdAt": r.created_at} for r in runs]
 
 @app.get("/health")
 def health():

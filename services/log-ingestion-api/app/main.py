@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker, Session
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(PROJECT_ROOT)
 
-from services.shared.models import Base, Pipeline
+from services.shared.models import Base, Pipeline, PipelineRun
 
 app = FastAPI(title="Log Ingestion API", version="0.2.0")
 
@@ -67,9 +67,19 @@ def ingest(event: LogEvent, db: Session = Depends(get_db)):
         pipeline = Pipeline(name=event.job_id, status=status, last_run="Just now")
         db.add(pipeline)
 
+    # 2. Record this individual run
+    existing_run = db.query(PipelineRun).filter(PipelineRun.run_id == event.run_id).first()
+    if not existing_run:
+        db.add(PipelineRun(
+            pipeline_name=event.job_id,
+            run_id=event.run_id,
+            status=status,
+            created_at=event.timestamp,
+        ))
+
     db.commit()
 
-    # 2. For errors, publish to queue — AI analysis happens async in the worker
+    # 3. For errors, publish to queue — AI analysis happens async in the worker
     if event.level == "ERROR":
         redis_client.xadd(STREAM_NAME, {
             "job_id": event.job_id,
