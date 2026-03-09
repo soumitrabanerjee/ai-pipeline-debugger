@@ -26,6 +26,8 @@ Environment variables:
 
 import os
 import uuid
+import subprocess
+import sys
 import requests
 from datetime import datetime, timezone
 from typing import Optional
@@ -33,7 +35,11 @@ from typing import Optional
 from fastapi import FastAPI, BackgroundTasks
 from pydantic import BaseModel
 
-INGEST_URL = os.getenv("INGEST_URL", "http://localhost:8000/ingest")
+INGEST_URL   = os.getenv("INGEST_URL",   "http://localhost:8000/ingest")
+SPARK_JOBS_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "..", "spark-jobs"
+)
 
 app = FastAPI(title="Log Collection Webhook Collector", version="1.0.0")
 
@@ -81,6 +87,126 @@ def _forward(payload: dict):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ── Spark job submission ───────────────────────────────────────────────────────
+
+def _run_spark_job(script: str, job_id: str, run_id: str):
+    """Run a PySpark script as a subprocess (fire-and-forget background task)."""
+    script_path = os.path.join(SPARK_JOBS_DIR, script)
+    env = os.environ.copy()
+    env.update({
+        "JOB_ID":      job_id,
+        "WEBHOOK_URL": "http://localhost:8003/webhook/generic",
+        "SPARK_LOG_DIR": "/tmp/spark-logs",
+    })
+    print(f"[spark-submit] Launching {script} (run_id={run_id})")
+    try:
+        result = subprocess.run(
+            [sys.executable, script_path],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        print(f"[spark-submit] {script} exited with code {result.returncode}")
+        if result.stdout:
+            print(result.stdout[-2000:])   # tail last 2 KB
+        if result.stderr:
+            print(result.stderr[-2000:], file=sys.stderr)
+    except subprocess.TimeoutExpired:
+        print(f"[spark-submit] {script} timed out after 300s", file=sys.stderr)
+    except Exception as exc:
+        print(f"[spark-submit] Failed to launch {script}: {exc}", file=sys.stderr)
+
+
+@app.post("/spark/student-analytics", status_code=202)
+def submit_student_analytics(background: BackgroundTasks):
+    """Async fire-and-forget submission (for manual curl testing)."""
+    run_id = str(uuid.uuid4())
+    background.add_task(
+        _run_spark_job,
+        script="student_analytics.py",
+        job_id="spark-student-analytics",
+        run_id=run_id,
+    )
+    return {"status": "submitted", "job": "spark-student-analytics", "run_id": run_id}
+
+
+@app.post("/spark/student-analytics/run")
+def run_student_analytics_sync():
+    """
+    Run the student analytics PySpark job synchronously.
+
+    Blocks until the job completes, then returns the result.
+    Returns HTTP 200 on success, HTTP 500 on failure (with stderr).
+
+    Called by the Airflow DAG so that Spark job failure propagates
+    back to Airflow as a real task failure — not a silent background error.
+
+    Example:
+        curl -X POST http://localhost:8003/spark/student-analytics/run
+    """
+    from fastapi import Response
+
+    run_id      = str(uuid.uuid4())
+    script_path = os.path.join(SPARK_JOBS_DIR, "student_analytics.py")
+    env = os.environ.copy()
+    env.update({
+        "JOB_ID":        "spark-student-analytics",
+        "WEBHOOK_URL":   "http://localhost:8003/webhook/generic",
+        "SPARK_LOG_DIR": "/tmp/spark-logs",
+    })
+
+    print(f"[spark-submit] SYNC run starting (run_id={run_id})")
+    try:
+        result = subprocess.run(
+            [sys.executable, script_path],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        return Response(
+            content='{"error":"Spark job timed out after 300s"}',
+            status_code=504,
+            media_type="application/json",
+        )
+
+    stdout_tail = result.stdout[-3000:] if result.stdout else ""
+    stderr_tail = result.stderr[-3000:] if result.stderr else ""
+
+    print(f"[spark-submit] SYNC run finished — exit code {result.returncode}")
+    if stdout_tail:
+        print(stdout_tail)
+    if stderr_tail:
+        print(stderr_tail, file=sys.stderr)
+
+    if result.returncode != 0:
+        # Extract the key error line from stdout (Spark prints it there)
+        error_line = next(
+            (l for l in result.stdout.splitlines() if "FAILED" in l or "PythonException" in l or "ValueError" in l),
+            f"Spark job exited with code {result.returncode}",
+        )
+        return Response(
+            content=__import__("json").dumps({
+                "status":    "failed",
+                "run_id":    run_id,
+                "exit_code": result.returncode,
+                "error":     error_line,
+                "stdout":    stdout_tail[-1000:],
+                "stderr":    stderr_tail[-1000:],
+            }),
+            status_code=500,
+            media_type="application/json",
+        )
+
+    return {
+        "status":  "success",
+        "run_id":  run_id,
+        "stdout":  stdout_tail[-500:],
+    }
 
 
 @app.post("/webhook/airflow", status_code=202)
