@@ -26,11 +26,6 @@ engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Pydantic Models (Schemas)
-class PipelineCreate(BaseModel):
-    name: str
-    status: str
-    last_run: str
-
 class PipelineStatus(BaseModel):
     name: str
     status: str
@@ -54,21 +49,6 @@ class DashboardData(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
-    db = SessionLocal()
-    if db.query(Pipeline).count() == 0:
-        pipelines_data = [
-            Pipeline(name="customer_etl", status="Failed", last_run="2 min ago"),
-            Pipeline(name="billing_pipeline", status="Success", last_run="10 min ago"),
-            Pipeline(name="analytics_daily", status="Failed", last_run="30 min ago"),
-        ]
-        db.add_all(pipelines_data)
-        errors_data = [
-            Error(pipeline_name="customer_etl", error_type="ExecutorLostFailure", root_cause="Spark executor memory exceeded", fix="Increase spark.executor.memory to 8g"),
-            Error(pipeline_name="analytics_daily", error_type="SchemaMismatch", root_cause="Column type mismatch in parquet", fix="Update schema or cast column types"),
-        ]
-        db.add_all(errors_data)
-        db.commit()
-    db.close()
     yield
 
 app = FastAPI(title="AI Pipeline Debugger API", version="0.1.0", lifespan=lifespan)
@@ -90,14 +70,6 @@ def get_db():
     finally:
         db.close()
 
-
-@app.post("/pipelines", response_model=PipelineStatus)
-def create_pipeline(pipeline: PipelineCreate, db: Session = Depends(get_db)):
-    db_pipeline = Pipeline(name=pipeline.name, status=pipeline.status, last_run=pipeline.last_run)
-    db.add(db_pipeline)
-    db.commit()
-    db.refresh(db_pipeline)
-    return {"name": db_pipeline.name, "status": db_pipeline.status, "lastRun": db_pipeline.last_run}
 
 @app.get("/dashboard", response_model=DashboardData)
 def get_dashboard_data(db: Session = Depends(get_db)):

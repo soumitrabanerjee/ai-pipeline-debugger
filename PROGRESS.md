@@ -1,10 +1,10 @@
 # Project Progress & Context
 
-## Current Status (As of March 8, 2026)
+## Current Status (As of March 9, 2026)
 
-Full-stack application: React frontend, four FastAPI backend services, Redis async queue, PostgreSQL, Slack alerting, and a **live Log Collection Layer** that watches real log files and accepts webhook pushes from Airflow/Spark/Databricks.
+Full-stack application: React frontend, four FastAPI backend services, Redis async queue, PostgreSQL, Slack alerting, and a **live Log Collection Layer** connected to a real running Airflow instance.
 
-**160 tests passing.**
+**Live data only — no seed/test data. All services running via Docker Compose. 160 tests passing.**
 
 ---
 
@@ -61,41 +61,37 @@ Web Dashboard    Slack Alerts
 
 | Service | Port | Status | Tech |
 |---|---|---|---|
-| Frontend | 5173 | ✅ Running | React + Vite |
-| API Layer | 8001 | ✅ Running | FastAPI + PostgreSQL |
-| Log Ingestion API | 8000 | ✅ Running | FastAPI + Redis |
-| AI Debugging Engine | 8002 | ✅ Running | FastAPI + Ollama |
-| Queue Worker | — | ✅ Running | Python + Redis Streams |
+| Frontend | 5173 | ✅ Running (Docker) | React + Vite |
+| API Layer | 8001 | ✅ Running (Docker) | FastAPI + PostgreSQL |
+| Log Ingestion API | 8000 | ✅ Running (Docker) | FastAPI + Redis |
+| AI Debugging Engine | 8002 | ✅ Running (Docker) | FastAPI + Ollama |
+| Queue Worker | — | ✅ Running (Docker) | Python + Redis Streams |
 | Webhook Collector | 8003 | ✅ Built, not started | FastAPI |
 | Log Agent | — | ✅ Built, not started | watchdog |
-| PostgreSQL | 5433 | ✅ Running | Homebrew pg16 |
-| Redis | 6379 | ✅ Running | Homebrew |
-| Ollama | 11434 | ✅ Running | llama3.1:8b |
+| PostgreSQL | 5434 | ✅ Running (Docker) | pg16 |
+| Redis | 6380 | ✅ Running (Docker) | Redis 7 |
+| Ollama | 11434 | ✅ Running (native host) | llama3.1:8b + gemma3:4b |
+
+> **Docker note:** `docker-compose.override.yml` is in place — `ai-engine` points to native host Ollama (`host.docker.internal:11434`) instead of the Docker Ollama container (which is CPU-only and fails its healthcheck on Mac). All services started via `docker compose up -d`.
 
 ---
 
 ## How to Run
 
 ```bash
-# Infrastructure
-brew services start postgresql@16
-brew services start redis
-ollama serve &
+# ── Docker Compose (preferred) ─────────────────────────────────────
+docker compose up -d --no-deps ai-engine   # starts AI engine pointing to host Ollama
+docker compose up -d --no-deps queue-worker
+# All other services start automatically via docker compose up -d
+# dashboard at http://localhost:5173
 
-# Backend services (separate terminals)
-/bin/zsh frontend/web-dashboard/src/components/start_api_layer.sh     # :8001
-/bin/zsh frontend/web-dashboard/src/components/start_ingestion.sh     # :8000
-/bin/zsh frontend/web-dashboard/src/components/start_ai_engine.sh     # :8002
-/bin/zsh frontend/web-dashboard/src/components/start_worker.sh        # queue worker
+# ── Send a test error event ────────────────────────────────────────
+./frontend/web-dashboard/new_run.sh
 
-# Frontend
-cd frontend/web-dashboard && npm run dev                               # :5173
-
-# Log Collection (optional — picks up real log files)
+# ── Log Collection (run natively, optional) ────────────────────────
 python services/log-collection-layer/agent.py \
   --watch-dir /tmp/pipeline-logs --job-id spark-etl-prod
 
-# Generate test logs (drives the agent)
 python services/log-collection-layer/simulator.py \
   --type spark --job-id spark-etl-prod --errors 2
 
@@ -104,7 +100,7 @@ curl -X POST http://localhost:8003/webhook/airflow \
   -H 'Content-Type: application/json' \
   -d '{"dag_id":"my-dag","run_id":"run-001","exception":"OOM error"}'
 
-# Run all tests
+# ── Tests ──────────────────────────────────────────────────────────
 python3 -m pytest tests/ -v
 ```
 
@@ -126,7 +122,12 @@ python3 -m pytest tests/ -v
   - `simulator.py` — generates realistic Spark/Airflow/dbt logs for local dev/demo
   - `log_parser.py` — parses Airflow `[ts] {module} LEVEL - msg` and Spark `ts LEVEL msg` formats; normalises timestamps to ISO-8601 UTC
 - [x] Fixed all deprecation warnings (`declarative_base`, `on_event`)
-- [x] Docker Compose file — all 8 services, healthchecks, named volumes (needs Docker Desktop to run)
+- [x] **Live-only data** — removed DB seed data (`customer_etl`, `billing_pipeline`, `analytics_daily` fake pipelines + errors) from `api-layer/main.py` lifespan; database now starts empty and populates only from real pipeline events
+- [x] **Real Airflow integration** — `debugger_etl_pipeline` DAG created in Airflow, triggers `on_failure_callback` → webhook collector (port 8003) → ingestion API → AI analysis; end-to-end tested with live `MemoryError` from a real Airflow task execution
+- [x] **Airflow log parser fix** — updated `_AIRFLOW_RE` regex and `_normalise_ts` in `log_parser.py` to handle `+0530` timezone offset format used by Airflow 3
+- [x] Docker Compose file — all 8 services, healthchecks, named volumes; running via Docker Compose with `docker-compose.override.yml` for host Ollama
+- [x] **PySpark integration** — `services/spark-jobs/customer_etl.py` (LTV ETL job with realistic UDF `ZeroDivisionError`); `log4j.properties` routes Spark logs to `/tmp/spark-logs/*.log`; `run_spark_etl.sh` starts log agent then fires the job; dual ingestion path (log agent + webhook); `log_parser.py` extended with `_PYSPARK_RE` for native Log4j format (`26/03/09 22:02:23 ERROR Class: msg`) + `%y/%m/%d %H:%M:%S` timestamp format; tested end-to-end: two live Spark pipelines in DB with AI root causes
+- [x] **Log Processing Layer wired into worker** — `extract_error()` from `log-processing-layer/parser.py` now replaces the naive `split(":")` in `worker.py`; structured `severity` + `summary` passed as `pipeline_context` to AI engine; fixed Dockerfile to include `services/alerting` and `services/log-processing-layer`; added `PYTHONUNBUFFERED=1` for visible Docker logs
 - [x] **160 passing tests**
   - `test_log_collection.py` — 46 tests (parser, agent, file tailer, webhook endpoints)
   - `test_alerter.py` — 16 tests
@@ -150,7 +151,7 @@ python3 -m pytest tests/ -v
 | Log Ingestion API | ✅ Built | — |
 | Message Queue | ✅ Built | — |
 | **Log Storage (raw logs)** | ❌ Missing | Raw log text not stored anywhere; only metadata in PostgreSQL. Architecture calls for S3/MinIO. |
-| **Log Processing Layer** | ⚠️ Partial | `parser.py` exists and is tested but **not wired into the worker**. Worker still does a naive `message.split(":")` instead of using `extract_error()`. |
+| **Log Processing Layer** | ✅ Done | `extract_error()` wired into worker; `error_type` uses `parsed.signature`; `severity` + `summary` sent as `pipeline_context` to AI engine |
 | AI Debugging Engine | ✅ Built | Prompt is basic — no RAG / vector retrieval yet |
 | **Root Cause Engine** | ⚠️ Stub | `rank_hypotheses()` sorts by score but is never called; AI result goes straight to DB |
 | API Layer | ✅ Built | — |
@@ -162,16 +163,16 @@ python3 -m pytest tests/ -v
 
 ## Known Issues / Technical Debt
 
-- **Port 5432 conflict** — older PostgreSQL at `/Library/PostgreSQL/16`; Homebrew pg on 5433
-- **Docker Desktop not installed** — compose file is written but cannot be built/run yet
-- **Webhook collector not auto-started** — needs a start script like the other services
+- **Ollama in Docker** — Docker Ollama container is CPU-only on Mac and fails its healthcheck; workaround in `docker-compose.override.yml` routes `ai-engine` to native host Ollama instead
+- **Webhook collector not in Docker Compose** — starts natively (`uvicorn webhook_collector:app --port 8003`); needs its own Compose service for full containerisation
+- **Log agent not in Docker** — watchdog-based `agent.py` runs natively; Airflow integration uses `on_failure_callback` webhook instead of file-watching for now
 
 ---
 
 ## Next Steps (Priority Order)
 
-1. **Wire Log Processing Layer into worker** — replace naive `split(":")` with `extract_error()` from `log-processing-layer/parser.py`; pass `severity` + `summary` to AI prompt for richer analysis
-2. **RAG / Vector DB** — install `pgvector`, store error embeddings, retrieve similar past failures to ground the LLM prompt (highest AI quality improvement)
-3. **Run History UI** — show `GET /pipelines/{name}/runs` in the pipeline detail modal
-4. **Log Storage (raw)** — store raw log text to PostgreSQL `logs_metadata` table (skip S3 for MVP; add later)
-5. **Root Cause Engine integration** — use `rank_hypotheses()` to score + rank AI output before saving
+1. ~~**Wire Log Processing Layer into worker**~~ ✅ Done
+2. **⭐ RAG / Vector DB** *(recommended next task)* — install `pgvector`, embed errors on ingest, retrieve top-K similar past failures to ground the LLM prompt (highest AI quality improvement)
+3. **Root Cause Engine integration** — call `rank_hypotheses()` to score + rank AI hypotheses before saving to DB; currently it exists but is never called
+4. **Run History UI** — the `GET /pipelines/{name}/runs` endpoint exists and is tested; just needs to be surfaced in the pipeline detail modal
+5. **Log Storage (raw)** — store raw log text in a `raw_logs` PostgreSQL column on the Error record (skip S3 for MVP)

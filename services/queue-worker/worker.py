@@ -19,11 +19,13 @@ import redis
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.append(PROJECT_ROOT)
+sys.path.append(os.path.join(PROJECT_ROOT, 'services', 'log-processing-layer'))
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from services.shared.models import Error
 from services.alerting.alerter import send_slack_alert
+from parser import extract_error
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://debugger:debugger@localhost:5433/pipeline_debugger")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
@@ -50,12 +52,12 @@ def ensure_consumer_group():
             raise
 
 
-def analyze_with_ai(message: str) -> dict:
+def analyze_with_ai(message: str, pipeline_context: str | None = None) -> dict:
     """Call the AI Debugging Engine. Returns fallback dict on failure."""
     try:
         response = requests.post(
             AI_ENGINE_URL,
-            json={"error_message": message},
+            json={"error_message": message, "pipeline_context": pipeline_context},
             timeout=120,
         )
         if response.status_code == 200:
@@ -75,10 +77,14 @@ def process_event(event_id: str, fields: dict):
 
     print(f"[worker] Processing {event_id} — pipeline={job_id}")
 
-    # Extract error type from message
-    error_type = message.split(":")[0].strip() if ":" in message else message[:50]
+    # Use the log processing layer to parse structured fields from the message
+    parsed = extract_error(message)
+    error_type = parsed.signature
+    pipeline_context = f"Severity: {parsed.severity}\nError summary: {parsed.summary}"
 
-    ai_result = analyze_with_ai(message)
+    print(f"[worker] Parsed — error_type='{error_type}' severity='{parsed.severity}'")
+
+    ai_result = analyze_with_ai(message, pipeline_context=pipeline_context)
 
     db = SessionLocal()
     try:

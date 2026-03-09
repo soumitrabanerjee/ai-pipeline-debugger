@@ -262,9 +262,9 @@ export default function Dashboard() {
             ) : (
               <>
                 <Plus size={14} />
-                Add Pipeline
+                Connect Pipeline
               </>
-            )}
+)}
           </button>
         </div>
 
