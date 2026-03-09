@@ -52,7 +52,7 @@ function XIcon({ size = 16 }) {
   )
 }
 
-export default function Dashboard() {
+export default function Dashboard({ onBack }) {
   const [query, setQuery] = useState('')
   const [data, setData] = useState({ pipelines: [], errors: [] })
   const [loading, setLoading] = useState(true)
@@ -213,6 +213,23 @@ export default function Dashboard() {
       <header className="dashboard-header">
         <div className="header-inner">
           <div className="header-brand">
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600,
+                  fontFamily: 'inherit', padding: '0.25rem 0.5rem 0.25rem 0',
+                  marginRight: '0.25rem', transition: 'color 150ms',
+                }}
+                onMouseEnter={e => e.target.style.color = 'var(--text)'}
+                onMouseLeave={e => e.target.style.color = 'var(--text-muted)'}
+                title="Back to home"
+              >
+                ← Home
+              </button>
+            )}
             <div className="header-logo">AI</div>
             <div>
               <div className="header-title">Pipeline Debugger</div>
