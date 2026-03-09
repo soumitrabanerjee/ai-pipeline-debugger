@@ -1,110 +1,113 @@
+import json
+import os
+import re
+
+import anthropic
 from fastapi import FastAPI
 from pydantic import BaseModel
-import requests
-import json
-import re
 
 app = FastAPI(title="AI Debugging Engine", version="0.1.0")
 
-# Ollama Configuration — override OLLAMA_HOST for Docker
-import os
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_URL = f"{OLLAMA_HOST}/api/generate"
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+# Claude model — Haiku is the cheapest/fastest; override via env var
+CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+
+# Instantiated once at startup; reads ANTHROPIC_API_KEY from environment
+_client = anthropic.Anthropic()
+
 
 class ErrorAnalysisRequest(BaseModel):
     error_message: str
     pipeline_context: str | None = None
+
 
 class ErrorAnalysisResponse(BaseModel):
     root_cause: str
     suggested_fix: str
     confidence_score: float
 
+
 def clean_json_response(text: str) -> str:
-    """
-    Cleans the response to ensure it's valid JSON.
-    """
-    # Remove markdown code blocks if present
+    """Strip markdown fences so the response can be parsed as JSON."""
     text = re.sub(r"```json\s*", "", text)
     text = re.sub(r"```\s*", "", text)
     return text.strip()
 
+
 @app.post("/analyze", response_model=ErrorAnalysisResponse)
 def analyze_error(request: ErrorAnalysisRequest):
     """
-    Analyzes an error message using Local Ollama (Llama 3.1) and returns a root cause and suggested fix.
+    Analyse a pipeline error using Claude and return a structured root cause + fix.
     """
     error_msg = request.error_message
-    context = request.pipeline_context or "No additional context provided."
+    context   = request.pipeline_context or "No additional context provided."
 
-    prompt = f"""
-    You are an expert Site Reliability Engineer (SRE). Analyze the following error log from a data pipeline.
+    prompt = f"""You are an expert Site Reliability Engineer (SRE). \
+Analyse the following error log from a data pipeline.
 
-    Error Log:
-    "{error_msg}"
+Error Log:
+"{error_msg}"
 
-    Context:
-    {context}
+Context:
+{context}
 
-    Provide a root cause analysis and a specific, actionable fix.
-    Return your response in strict JSON format with the following keys:
-    - "root_cause": A concise explanation of why the error occurred.
-    - "suggested_fix": A specific command or configuration change to fix it.
-    - "confidence_score": A number between 0.0 and 1.0 indicating your confidence.
+Provide a root cause analysis and a specific, actionable fix.
+Return your response in strict JSON format with exactly these keys:
+- "root_cause": A concise explanation of why the error occurred.
+- "suggested_fix": A specific command or configuration change to fix it.
+- "confidence_score": A number between 0.0 and 1.0 indicating your confidence.
 
-    Do not include any markdown formatting or explanation outside the JSON.
-    """
+Do not include any markdown formatting or explanation outside the JSON."""
 
-    payload = {
-        "model": OLLAMA_MODEL,
-        "prompt": prompt,
-        "format": "json",  # Force JSON output
-        "stream": False    # Get the full response at once
-    }
-
-    print(f"Calling Ollama ({OLLAMA_MODEL}) at {OLLAMA_URL}...")
+    print(f"[ai-engine] Calling Claude ({CLAUDE_MODEL})...")
 
     try:
-        # Increased timeout to 600 seconds for slower local inference
-        response = requests.post(OLLAMA_URL, json=payload, timeout=600)
+        message = _client.messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
 
-        print(f"Ollama Response Status: {response.status_code}")
-        print(f"Ollama Raw Response: {response.text[:500]}...") # Print first 500 chars
+        content = message.content[0].text
+        print(f"[ai-engine] Claude response (first 300 chars): {content[:300]}")
 
-        response.raise_for_status()
-
-        data = response.json()
-        content = data.get("response", "")
-
-        # Parse the JSON response
         try:
-            cleaned_text = clean_json_response(content)
-            analysis = json.loads(cleaned_text)
-
+            analysis = json.loads(clean_json_response(content))
             return {
-                "root_cause": analysis.get("root_cause", "Analysis failed to extract root cause."),
-                "suggested_fix": analysis.get("suggested_fix", "Analysis failed to extract fix."),
-                "confidence_score": analysis.get("confidence_score", 0.5)
+                "root_cause":       analysis.get("root_cause",       "Analysis failed to extract root cause."),
+                "suggested_fix":    analysis.get("suggested_fix",    "Analysis failed to extract fix."),
+                "confidence_score": float(analysis.get("confidence_score", 0.5)),
+            }
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"[ai-engine] Failed to parse Claude response: {e}\nRaw: {content}")
+            return {
+                "root_cause":       "AI Analysis failed to parse response.",
+                "suggested_fix":    "Check logs manually.",
+                "confidence_score": 0.0,
             }
 
-        except json.JSONDecodeError as e:
-            print(f"Failed to parse Ollama response: {e}")
-            print(f"Raw response: {content}")
-            return {
-                "root_cause": "AI Analysis failed to parse response.",
-                "suggested_fix": "Check logs manually.",
-                "confidence_score": 0.0
-            }
-
-    except requests.RequestException as e:
-        print(f"*** OLLAMA API REQUEST FAILED: {e} ***")
+    except anthropic.APIConnectionError as e:
+        print(f"[ai-engine] Claude API connection error: {e}")
         return {
-            "root_cause": "AI Service Unavailable (Ollama Connection Failed).",
-            "suggested_fix": "Ensure Ollama is running (ollama serve).",
-            "confidence_score": 0.0
+            "root_cause":       "AI Service Unavailable (Claude API connection failed).",
+            "suggested_fix":    "Check ANTHROPIC_API_KEY and network connectivity.",
+            "confidence_score": 0.0,
         }
+    except anthropic.AuthenticationError as e:
+        print(f"[ai-engine] Claude API auth error: {e}")
+        return {
+            "root_cause":       "AI Service Unavailable (invalid or missing ANTHROPIC_API_KEY).",
+            "suggested_fix":    "Set a valid ANTHROPIC_API_KEY environment variable.",
+            "confidence_score": 0.0,
+        }
+    except anthropic.APIError as e:
+        print(f"[ai-engine] Claude API error: {e}")
+        return {
+            "root_cause":       f"AI Service Unavailable (Claude API error: {type(e).__name__}).",
+            "suggested_fix":    "Retry the request or check the Anthropic status page.",
+            "confidence_score": 0.0,
+        }
+
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "model": CLAUDE_MODEL}

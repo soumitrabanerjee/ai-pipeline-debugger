@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY services/ai-debugging-engine ./services/ai-debugging-engine
 
-RUN pip install --no-cache-dir fastapi uvicorn requests
+RUN pip install --no-cache-dir fastapi uvicorn anthropic
 
 WORKDIR /app/services/ai-debugging-engine
 

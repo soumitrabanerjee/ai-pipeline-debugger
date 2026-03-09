@@ -1,6 +1,7 @@
-/* ── AI Pipeline Debugger – Premium Design System ── */
-
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+/* ── AI Pipeline Debugger – Premium Design System ── */
 
 :root {
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -692,4 +693,310 @@ h1,h2,h3,h4,p { margin:0; }
   .lp-hero-ctas { flex-direction: column; align-items: center; }
   .lp-arch-flow { flex-direction: column; }
   .lp-footer-inner { flex-direction: column; text-align: center; }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════
+   DASHBOARD  — matches landing page design tokens
+   ═══════════════════════════════════════════════════════════════════ */
+
+.db-shell {
+  background: #05080f;
+  min-height: 100vh;
+  color: #e2e8f0;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Header ── */
+.db-header {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  background: rgba(5,8,15,0.85);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.db-header-inner {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.db-header-left  { display: flex; align-items: center; gap: 0.6rem; }
+.db-header-right { display: flex; align-items: center; gap: 0.5rem; }
+
+.db-back-btn {
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  transition: color 150ms, background 150ms;
+  margin-right: 0.25rem;
+}
+.db-back-btn:hover { color: #f1f5f9; background: rgba(255,255,255,0.05); }
+
+.db-logo-icon { font-size: 1.1rem; }
+.db-logo-text { font-size: 0.95rem; font-weight: 700; color: #f1f5f9; letter-spacing: -0.01em; }
+
+.db-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #818cf8;
+  background: rgba(99,102,241,0.12);
+  border: 1px solid rgba(99,102,241,0.25);
+  border-radius: 6px;
+  padding: 0.2rem 0.55rem;
+}
+
+@keyframes db-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(0.8)} }
+.db-live-dot {
+  width: 7px; height: 7px;
+  background: #10b981;
+  border-radius: 50%;
+  animation: db-pulse 2s ease-in-out infinite;
+}
+.db-live-label { font-size: 0.75rem; color: #10b981; font-weight: 600; }
+
+/* ── Main ── */
+.db-main {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 88px 1.5rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+/* ── Toolbar ── */
+.db-toolbar {
+  display: flex;
+  gap: 0.875rem;
+  align-items: center;
+}
+.db-search-wrap {
+  flex: 1;
+  position: relative;
+}
+.db-search-icon {
+  position: absolute;
+  left: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.9rem;
+  pointer-events: none;
+}
+.db-search-input {
+  width: 100%;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 0.7rem 1rem 0.7rem 2.6rem;
+  font-size: 0.875rem;
+  font-family: inherit;
+  color: #f1f5f9;
+  outline: none;
+  transition: border-color 150ms;
+}
+.db-search-input::placeholder { color: #475569; }
+.db-search-input:focus { border-color: rgba(99,102,241,0.5); }
+
+/* ── Stats ── */
+.db-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+.db-stat-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 14px;
+  padding: 1.5rem 1.75rem;
+  transition: border-color 200ms;
+}
+.db-stat-card:hover { border-color: rgba(255,255,255,0.12); }
+.db-stat-label { font-size: 0.78rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 0.5rem; }
+.db-stat-value { font-size: 2.25rem; font-weight: 800; color: #f1f5f9; letter-spacing: -0.02em; line-height: 1; margin: 0 0 0.35rem; }
+.db-stat-sub   { font-size: 0.78rem; color: #475569; margin: 0; }
+
+/* ── Section ── */
+.db-section { display: flex; flex-direction: column; gap: 0.625rem; }
+.db-section-header { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.25rem; }
+.db-section-title  { font-size: 1rem; font-weight: 700; color: #f1f5f9; margin: 0; }
+.db-count-badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #64748b;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+}
+
+/* ── Pipeline card ── */
+.db-pipeline-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: border-color 150ms, background 150ms;
+}
+.db-pipeline-card:hover {
+  border-color: rgba(99,102,241,0.3);
+  background: rgba(99,102,241,0.04);
+}
+.db-pipeline-name { font-size: 0.9rem; font-weight: 600; color: #f1f5f9; margin: 0 0 0.2rem; font-family: monospace; }
+.db-pipeline-meta { font-size: 0.78rem; color: #475569; margin: 0; }
+
+/* ── Status chips ── */
+.db-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 0.25rem 0.7rem;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.db-chip-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.db-chip-failed  { color: #f87171; background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.2); }
+.db-chip-success { color: #34d399; background: rgba(52,211,153,0.08); border-color: rgba(52,211,153,0.2); }
+
+/* ── Analysis card ── */
+.db-analysis-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.db-analysis-pipeline { font-size: 0.72rem; font-weight: 700; color: #818cf8; text-transform: uppercase; letter-spacing: 0.06em; margin: 0; }
+.db-error-type  { font-size: 0.85rem; font-weight: 600; color: #f87171; margin: 0; }
+.db-error-cause { font-size: 0.875rem; color: #94a3b8; line-height: 1.6; margin: 0; }
+.db-fix-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  background: rgba(52,211,153,0.05);
+  border: 1px solid rgba(52,211,153,0.12);
+  border-radius: 8px;
+  padding: 0.6rem 0.875rem;
+  font-size: 0.85rem;
+  color: #6ee7b7;
+  line-height: 1.55;
+}
+.db-fix-icon { flex-shrink: 0; margin-top: 0.05rem; }
+
+/* ── Error card (inside modal) ── */
+.db-error-card {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+/* ── Modal ── */
+.db-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0,0,0,0.7);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+.db-modal {
+  background: #0d1117;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 18px;
+  width: 100%;
+  max-width: 680px;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 40px 80px rgba(0,0,0,0.6);
+}
+.db-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 1.5rem 1.75rem 1rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.db-modal-title { font-size: 1.1rem; font-weight: 700; color: #f1f5f9; margin: 0 0 0.5rem; font-family: monospace; }
+.db-modal-meta  { display: flex; align-items: center; gap: 0.75rem; }
+.db-modal-meta-text { font-size: 0.8rem; color: #475569; }
+.db-modal-close {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0.35rem 0.6rem;
+  transition: background 150ms, color 150ms;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.db-modal-close:hover { background: rgba(255,255,255,0.1); color: #f1f5f9; }
+.db-modal-section-label { font-size: 0.72rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.07em; padding: 0.75rem 1.75rem 0; }
+.db-modal-body { overflow-y: auto; padding: 0.75rem 1.75rem 1.75rem; display: flex; flex-direction: column; gap: 0.75rem; }
+.db-modal-body::-webkit-scrollbar { width: 4px; }
+.db-modal-body::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+
+/* ── Center states ── */
+.db-center-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 4rem 1rem; }
+.db-center-icon  { font-size: 2rem; }
+.db-center-text  { font-size: 0.95rem; color: #64748b; margin: 0; }
+.db-center-sub   { font-size: 0.825rem; color: #334155; margin: 0; }
+.db-empty        { padding: 2.5rem 1rem; text-align: center; color: #334155; font-size: 0.875rem; }
+
+@keyframes db-spin { to { transform: rotate(360deg); } }
+.db-spinner {
+  width: 28px; height: 28px;
+  border: 2px solid rgba(99,102,241,0.2);
+  border-top-color: #6366f1;
+  border-radius: 50%;
+  animation: db-spin 0.7s linear infinite;
+}
+
+/* ── Connect Pipeline form wrapper ── */
+.db-form-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 14px;
+  padding: 1.75rem;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .db-stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .db-toolbar { flex-direction: column; align-items: stretch; }
+}
+@media (max-width: 500px) {
+  .db-stats-grid { grid-template-columns: 1fr; }
 }

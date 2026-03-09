@@ -119,6 +119,7 @@ def process_event(event_id: str, fields: dict):
         error_type=error_type,
         root_cause=ai_result.get("root_cause", "Unknown"),
         fix=ai_result.get("suggested_fix", "Check logs manually."),
+        severity=parsed.severity or "ERROR",
     )
 
 
