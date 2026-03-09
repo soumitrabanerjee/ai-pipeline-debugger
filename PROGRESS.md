@@ -161,6 +161,26 @@ python3 -m pytest tests/ -v
 
 ---
 
+## Project Cleanup (March 9, 2026)
+
+Removed all unused and misplaced files:
+
+| Deleted | Reason |
+|---|---|
+| `services/log-storage/` | README-only stub, never implemented |
+| `services/message-queue/` | README-only stub, Redis used directly |
+| `infra/docker-compose.yml` | Old draft with MinIO + wrong ports, superseded by root compose |
+| `frontend/.../src/components/start_*.sh` (4 files) | Shell scripts in wrong location, superseded by Docker |
+| `local-api-server.mjs`, `local-server.mjs`, `local-frontend.html` | Pre-Docker local dev files |
+| `.gitkeep` | Empty marker file |
+| `.idea/` | IDE settings |
+| `frontend/.../src/components/venv/` | Misplaced Python venv inside React folder |
+| All `__pycache__/` (10 dirs) | Bytecode cache, never needed in repo |
+
+Kept: `services/root-cause-engine/engine.py` and `services/ai-debugging-engine/rag_pipeline.py` — both have tests and are planned for upcoming features.
+
+---
+
 ## Known Issues / Technical Debt
 
 - **Ollama in Docker** — Docker Ollama container is CPU-only on Mac and fails its healthcheck; workaround in `docker-compose.override.yml` routes `ai-engine` to native host Ollama instead
