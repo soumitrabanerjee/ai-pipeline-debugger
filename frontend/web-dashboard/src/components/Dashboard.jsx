@@ -16,8 +16,11 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme 
 
   const fetchData = async (isInitial = false) => {
     if (isInitial) setLoading(true)
+    const token = localStorage.getItem('apd_token')
     try {
-      const res = await fetch('http://localhost:8001/dashboard')
+      const res = await fetch('http://localhost:8001/dashboard', {
+        headers: token ? { 'x-session-token': token } : {},
+      })
       if (!res.ok) throw new Error('Failed to fetch dashboard data')
       setData(await res.json())
       setError(null)
@@ -38,8 +41,11 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme 
   const handlePipelineClick = async (pipeline) => {
     setSelectedPipeline(pipeline)
     setDetailLoading(true)
+    const token = localStorage.getItem('apd_token')
     try {
-      const res = await fetch(`http://localhost:8001/pipelines/${encodeURIComponent(pipeline.name)}/errors`)
+      const res = await fetch(`http://localhost:8001/pipelines/${encodeURIComponent(pipeline.name)}/errors`, {
+        headers: token ? { 'x-session-token': token } : {},
+      })
       if (!res.ok) throw new Error()
       setPipelineErrors(await res.json())
     } catch {

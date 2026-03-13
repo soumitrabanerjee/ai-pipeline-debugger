@@ -7,7 +7,12 @@ COPY services/alerting ./services/alerting
 COPY services/log-processing-layer ./services/log-processing-layer
 COPY services/queue-worker ./services/queue-worker
 
-RUN pip install --no-cache-dir sqlalchemy psycopg2-binary requests redis
+RUN pip install --no-cache-dir \
+    sqlalchemy \
+    psycopg2-binary \
+    requests \
+    redis \
+    pgvector
 
 WORKDIR /app/services/queue-worker
 

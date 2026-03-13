@@ -30,11 +30,15 @@ function useServiceHealth() {
 function useDashboardData() {
   const [data, setData] = useState({ pipelines: [], errors: [] })
   useEffect(() => {
-    const fetch_ = () =>
-      fetch(`${API}/dashboard`)
+    const fetch_ = () => {
+      const token = localStorage.getItem('apd_token')
+      return fetch(`${API}/dashboard`, {
+        headers: token ? { 'x-session-token': token } : {},
+      })
         .then(r => r.json())
         .then(setData)
         .catch(() => {})
+    }
     fetch_()
     const id = setInterval(fetch_, 5000)
     return () => clearInterval(id)

@@ -1,8 +1,16 @@
-from sqlalchemy import Column, Integer, String, Boolean, CheckConstraint, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, CheckConstraint, UniqueConstraint
 from sqlalchemy.orm import declarative_base
 
-# This is the single source of truth for our database schema.
+# pgvector is optional — falls back to String when package not installed (e.g. in unit tests)
+try:
+    from pgvector.sqlalchemy import Vector
+    _EMBED_COL = lambda: Column(Vector(384), nullable=True)  # noqa: E731
+except ImportError:
+    _EMBED_COL = lambda: Column(String, nullable=True)  # noqa: E731
+
 Base = declarative_base()
+
+EMBED_DIM = 384  # all-MiniLM-L6-v2 output dimension
 
 
 class Pipeline(Base):
@@ -10,19 +18,21 @@ class Pipeline(Base):
     Represents a data pipeline being monitored.
 
     Rules:
-      - name is the natural key (unique, NOT NULL, indexed).
+      - (workspace_id, name) is the natural composite key — unique per tenant.
       - status must be 'Failed' or 'Success' (CHECK constraint).
-      - last_run is a human-readable label ("Just now", "2 min ago").
+      - last_run stores the ISO-8601 timestamp of the most recent ingest.
     """
     __tablename__ = "pipelines"
     __table_args__ = (
         CheckConstraint("status IN ('Failed', 'Success')", name="ck_pipelines_status"),
+        UniqueConstraint("workspace_id", "name", name="uq_pipelines_workspace_name"),
     )
 
-    id       = Column(Integer, primary_key=True, index=True)
-    name     = Column(String,  unique=True, index=True, nullable=False)
-    status   = Column(String,  nullable=False)
-    last_run = Column(String,  nullable=False)
+    id           = Column(Integer, primary_key=True, index=True)
+    workspace_id = Column(String,  nullable=False, index=True, server_default="default")
+    name         = Column(String,  nullable=False, index=True)
+    status       = Column(String,  nullable=False)
+    last_run     = Column(String,  nullable=False)
 
 
 class PipelineRun(Base):
@@ -30,8 +40,8 @@ class PipelineRun(Base):
     Tracks every individual execution of a pipeline.
 
     Rules:
-      - run_id is the natural key (unique, NOT NULL, indexed).
-      - pipeline_name is a FK to pipelines.name (referential integrity).
+      - run_id is the natural key (unique globally, NOT NULL, indexed).
+      - (workspace_id, pipeline_name) references pipelines scoped to tenant.
       - status must be 'Failed' or 'Success' (CHECK constraint).
       - created_at stores the ISO-8601 timestamp from the originating log event.
     """
@@ -41,8 +51,8 @@ class PipelineRun(Base):
     )
 
     id            = Column(Integer, primary_key=True, index=True)
-    pipeline_name = Column(String,  ForeignKey("pipelines.name", ondelete="CASCADE"),
-                           nullable=False, index=True)
+    workspace_id  = Column(String,  nullable=False, index=True, server_default="default")
+    pipeline_name = Column(String,  nullable=False, index=True)
     run_id        = Column(String,  unique=True, index=True, nullable=False)
     status        = Column(String,  nullable=False)
     created_at    = Column(String,  nullable=False)   # ISO-8601
@@ -50,7 +60,7 @@ class PipelineRun(Base):
 
 class User(Base):
     """
-    A registered SaaS user.
+    A registered SaaS user. Each user is their own tenant (workspace_id = str(user.id)).
 
     Rules:
       - email is the natural key (unique, NOT NULL, indexed, lowercase enforced by app).
@@ -78,25 +88,66 @@ class User(Base):
     created_at    = Column(String,  nullable=False)
 
 
-class Error(Base):
+class RunbookChunk(Base):
     """
-    Stores the AI-analysed root cause for a pipeline error.
+    A single chunk of an internal runbook document, stored with its embedding
+    for semantic retrieval during AI root-cause analysis.
+
+    Ingestion pipeline:
+      markdown file → header-aware chunker → sentence-transformers → this table
+
+    Retrieval:
+      error embedding → KNN cosine search → top-K chunks → Claude prompt context
 
     Rules:
-      - (pipeline_name, error_type) is a natural composite unique key — deduplication
-        means repeated failures update the existing row rather than inserting new ones.
-      - pipeline_name is a FK to pipelines.name (referential integrity).
-      - detected_at is updated to the latest failure timestamp on every upsert.
+      - (workspace_id, source_file, chunk_index) is the natural composite key.
+      - chunk_text stores the raw markdown text of the chunk (≤600 chars).
+      - embedding is a 384-dim vector from all-MiniLM-L6-v2.
+      - source_file is the original filename (e.g. "spark_oom_runbook.md").
+      - section_title is the nearest ## heading above the chunk (for citations).
     """
-    __tablename__ = "errors"
+    __tablename__ = "runbook_chunks"
     __table_args__ = (
-        UniqueConstraint("pipeline_name", "error_type", name="uq_errors_pipeline_error"),
+        UniqueConstraint(
+            "workspace_id", "source_file", "chunk_index",
+            name="uq_runbook_chunks_workspace_file_idx",
+        ),
     )
 
     id            = Column(Integer, primary_key=True, index=True)
-    pipeline_name = Column(String,  ForeignKey("pipelines.name", ondelete="CASCADE"),
-                           nullable=False, index=True)
+    workspace_id  = Column(String,  nullable=False, index=True)
+    source_file   = Column(String,  nullable=False, index=True)
+    chunk_index   = Column(Integer, nullable=False)
+    section_title = Column(String,  nullable=True)   # nearest ## heading
+    chunk_text    = Column(String,  nullable=False)
+    created_at    = Column(String,  nullable=False)
+    embedding     = _EMBED_COL()
+
+
+class Error(Base):
+    """
+    Stores the AI-analysed root cause for a pipeline error, plus its embedding
+    vector for RAG-based retrieval of similar past incidents.
+
+    Rules:
+      - (workspace_id, pipeline_name, error_type) is the composite unique key —
+        deduplication is tenant-scoped.
+      - detected_at is updated to the latest failure timestamp on every upsert.
+      - embedding stores a 384-dim sentence-transformers vector for KNN search.
+    """
+    __tablename__ = "errors"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id", "pipeline_name", "error_type",
+            name="uq_errors_workspace_pipeline_error",
+        ),
+    )
+
+    id            = Column(Integer, primary_key=True, index=True)
+    workspace_id  = Column(String,  nullable=False, index=True, server_default="default")
+    pipeline_name = Column(String,  nullable=False, index=True)
     error_type    = Column(String,  nullable=False)
     root_cause    = Column(String,  nullable=True)
     fix           = Column(String,  nullable=True)
     detected_at   = Column(String,  nullable=True)   # ISO-8601; newest failure wins
+    embedding     = _EMBED_COL()                      # vector(384) for pgvector KNN search

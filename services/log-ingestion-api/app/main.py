@@ -58,33 +58,46 @@ def health() -> dict[str, str]:
 
 @app.post("/ingest", status_code=202)
 def ingest(event: LogEvent, db: Session = Depends(get_db)):
-    run_status = "Failed" if event.level == "ERROR" else "Success"
+    run_status   = "Failed" if event.level == "ERROR" else "Success"
+    workspace_id = event.workspace_id
 
-    # 1. Upsert pipeline row (status is set correctly below, after we know the latest run)
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    pipeline = db.query(Pipeline).filter(Pipeline.name == event.job_id).first()
+    # 1. Upsert pipeline row scoped to this workspace
+    now      = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    pipeline = db.query(Pipeline).filter(
+        Pipeline.workspace_id == workspace_id,
+        Pipeline.name         == event.job_id,
+    ).first()
     if pipeline:
         pipeline.last_run = now
     else:
-        pipeline = Pipeline(name=event.job_id, status=run_status, last_run=now)
+        pipeline = Pipeline(
+            workspace_id = workspace_id,
+            name         = event.job_id,
+            status       = run_status,
+            last_run     = now,
+        )
         db.add(pipeline)
 
     # 2. Record this individual run (skip if run_id already exists)
     if not db.query(PipelineRun).filter(PipelineRun.run_id == event.run_id).first():
         db.add(PipelineRun(
-            pipeline_name=event.job_id,
-            run_id=event.run_id,
-            status=run_status,
-            created_at=event.timestamp,
+            workspace_id  = workspace_id,
+            pipeline_name = event.job_id,
+            run_id        = event.run_id,
+            status        = run_status,
+            created_at    = event.timestamp,
         ))
 
     db.flush()  # write PipelineRun so the query below sees it
 
-    # 3. Derive pipeline status from the MOST RECENT run (by created_at).
+    # 3. Derive pipeline status from the MOST RECENT run (by created_at) for this workspace.
     #    This prevents a delayed old-error event from flipping a recovered pipeline back to Failed.
     latest_run = (
         db.query(PipelineRun)
-        .filter(PipelineRun.pipeline_name == event.job_id)
+        .filter(
+            PipelineRun.workspace_id  == workspace_id,
+            PipelineRun.pipeline_name == event.job_id,
+        )
         .order_by(PipelineRun.created_at.desc())
         .first()
     )
@@ -92,12 +105,13 @@ def ingest(event: LogEvent, db: Session = Depends(get_db)):
 
     db.commit()
 
-    # 4. For errors, publish to queue — AI analysis happens async in the worker
+    # 4. For errors, publish to queue — include workspace_id so worker can scope DB writes
     if event.level == "ERROR":
         redis_client.xadd(STREAM_NAME, {
-            "job_id": event.job_id,
-            "run_id": event.run_id,
-            "message": event.message,
+            "workspace_id": workspace_id,
+            "job_id":       event.job_id,
+            "run_id":       event.run_id,
+            "message":      event.message,
         })
 
     return {"status": "accepted", "run_id": event.run_id}

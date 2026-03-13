@@ -4,7 +4,14 @@ WORKDIR /app
 
 COPY services/ai-debugging-engine ./services/ai-debugging-engine
 
-RUN pip install --no-cache-dir fastapi uvicorn anthropic
+RUN pip install --no-cache-dir \
+    fastapi \
+    uvicorn \
+    anthropic \
+    sentence-transformers \
+    pgvector \
+    sqlalchemy \
+    psycopg2-binary
 
 WORKDIR /app/services/ai-debugging-engine
 

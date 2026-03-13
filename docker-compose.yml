@@ -3,7 +3,7 @@ services:
   # ── Infrastructure ────────────────────────────────────────────────
 
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: pipeline_debugger
       POSTGRES_USER: debugger
@@ -85,6 +85,10 @@ services:
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - CLAUDE_MODEL=${CLAUDE_MODEL:-claude-haiku-4-5-20251001}
+      - DATABASE_URL=postgresql://debugger:debugger@postgres:5432/pipeline_debugger
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   queue-worker:
     build:
@@ -93,7 +97,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://debugger:debugger@postgres:5432/pipeline_debugger
       - REDIS_URL=redis://redis:6379
-      - AI_ENGINE_URL=http://ai-engine:8002/analyze
+      - AI_ENGINE_URL=http://ai-engine:8002
     depends_on:
       postgres:
         condition: service_healthy

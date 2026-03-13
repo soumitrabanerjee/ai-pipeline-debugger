@@ -13,8 +13,9 @@ from sqlalchemy.orm import sessionmaker, Session
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.append(PROJECT_ROOT)
+sys.path.append(os.path.join(PROJECT_ROOT, 'services', 'log-processing-layer'))
 
-from services.shared.models import Base, Pipeline, PipelineRun, Error, User
+from services.shared.models import Base, Pipeline, PipelineRun, Error, User, RunbookChunk
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -90,7 +91,10 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     with engine.connect() as conn:
         # ── Column additions (safe: IF NOT EXISTS) ────────────────────────────
-        conn.execute(text("ALTER TABLE errors ADD COLUMN IF NOT EXISTS detected_at VARCHAR"))
+        conn.execute(text("ALTER TABLE errors         ADD COLUMN IF NOT EXISTS detected_at  VARCHAR"))
+        conn.execute(text("ALTER TABLE pipelines      ADD COLUMN IF NOT EXISTS workspace_id VARCHAR NOT NULL DEFAULT 'default'"))
+        conn.execute(text("ALTER TABLE pipeline_runs  ADD COLUMN IF NOT EXISTS workspace_id VARCHAR NOT NULL DEFAULT 'default'"))
+        conn.execute(text("ALTER TABLE errors         ADD COLUMN IF NOT EXISTS workspace_id VARCHAR NOT NULL DEFAULT 'default'"))
 
         # ── NOT NULL enforcement (fill nulls first, then set constraint) ──────
         conn.execute(text("UPDATE pipelines      SET status   = 'Failed'   WHERE status   IS NULL"))
@@ -139,22 +143,84 @@ async def lifespan(app: FastAPI):
             END $$;
         """))
 
-        # ── Unique composite key on errors (pipeline_name, error_type) ────────
+        # ── Workspace-scoped unique key on pipelines (replaces global unique on name) ──
         conn.execute(text("""
             DO $$ BEGIN
                 IF NOT EXISTS (
-                    SELECT 1 FROM pg_constraint WHERE conname = 'uq_errors_pipeline_error'
+                    SELECT 1 FROM pg_constraint WHERE conname = 'uq_pipelines_workspace_name'
                 ) THEN
-                    ALTER TABLE errors ADD CONSTRAINT uq_errors_pipeline_error
-                        UNIQUE (pipeline_name, error_type);
+                    ALTER TABLE pipelines DROP CONSTRAINT IF EXISTS pipelines_name_key;
+                    ALTER TABLE pipelines ADD CONSTRAINT uq_pipelines_workspace_name
+                        UNIQUE (workspace_id, name);
+                END IF;
+            END $$;
+        """))
+
+        # ── Workspace-scoped unique key on errors ─────────────────────────────
+        conn.execute(text("""
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'uq_errors_workspace_pipeline_error'
+                ) THEN
+                    ALTER TABLE errors DROP CONSTRAINT IF EXISTS uq_errors_pipeline_error;
+                    ALTER TABLE errors ADD CONSTRAINT uq_errors_workspace_pipeline_error
+                        UNIQUE (workspace_id, pipeline_name, error_type);
+                END IF;
+            END $$;
+        """))
+
+        # ── pgvector extension + embedding column + HNSW index ───────────────
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        conn.execute(text("ALTER TABLE errors ADD COLUMN IF NOT EXISTS embedding vector(384)"))
+        conn.execute(text("""
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_indexes WHERE indexname = 'ix_errors_embedding_hnsw'
+                ) THEN
+                    CREATE INDEX ix_errors_embedding_hnsw
+                        ON errors USING hnsw (embedding vector_cosine_ops)
+                        WITH (m = 16, ef_construction = 64);
+                END IF;
+            END $$;
+        """))
+
+        # ── Workspace indexes for fast tenant-scoped queries ─────────────────
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_pipelines_workspace     ON pipelines(workspace_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_pipeline_runs_workspace ON pipeline_runs(workspace_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_errors_workspace        ON errors(workspace_id)"))
+
+        # ── runbook_chunks table + vector index ───────────────────────────────
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS runbook_chunks (
+                id            SERIAL PRIMARY KEY,
+                workspace_id  VARCHAR NOT NULL,
+                source_file   VARCHAR NOT NULL,
+                chunk_index   INTEGER NOT NULL,
+                section_title VARCHAR,
+                chunk_text    TEXT    NOT NULL,
+                created_at    VARCHAR NOT NULL,
+                embedding     vector(384),
+                CONSTRAINT uq_runbook_chunks_workspace_file_idx
+                    UNIQUE (workspace_id, source_file, chunk_index)
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_runbook_chunks_workspace ON runbook_chunks(workspace_id)"
+        ))
+        conn.execute(text("""
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_indexes WHERE indexname = 'ix_runbook_chunks_embedding_hnsw'
+                ) THEN
+                    CREATE INDEX ix_runbook_chunks_embedding_hnsw
+                        ON runbook_chunks USING hnsw (embedding vector_cosine_ops)
+                        WITH (m = 16, ef_construction = 64);
                 END IF;
             END $$;
         """))
 
         # ── server_default for users.paid ─────────────────────────────────────
-        conn.execute(text(
-            "ALTER TABLE users ALTER COLUMN paid SET DEFAULT false"
-        ))
+        conn.execute(text("ALTER TABLE users ALTER COLUMN paid SET DEFAULT false"))
 
         conn.commit()
     yield
@@ -193,6 +259,10 @@ def get_current_user(
 
 def _user_out(user: User) -> dict:
     return {"email": user.email, "name": user.name, "paid": user.paid, "plan": user.plan}
+
+def _workspace(user: User) -> str:
+    """Each user is their own tenant. workspace_id = str(user.id)."""
+    return str(user.id)
 
 # ── Auth endpoints ─────────────────────────────────────────────────────────────
 
@@ -248,28 +318,59 @@ def sign_out(current_user: User = Depends(get_current_user), db: Session = Depen
 # ── Dashboard endpoints ────────────────────────────────────────────────────────
 
 @app.get("/dashboard", response_model=DashboardData)
-def get_dashboard_data(db: Session = Depends(get_db)):
-    pipelines = db.query(Pipeline).all()
-    errors    = db.query(Error).order_by(Error.detected_at.desc()).all()
+def get_dashboard_data(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ws        = _workspace(current_user)
+    pipelines = db.query(Pipeline).filter(Pipeline.workspace_id == ws).all()
+    errors    = (
+        db.query(Error)
+        .filter(Error.workspace_id == ws)
+        .order_by(Error.detected_at.desc())
+        .all()
+    )
     return {
         "pipelines": [{"name": p.name, "status": p.status, "lastRun": p.last_run} for p in pipelines],
         "errors":    [{"pipeline": e.pipeline_name, "error": e.error_type, "rootCause": e.root_cause, "fix": e.fix, "detectedAt": e.detected_at} for e in errors],
     }
 
 @app.get("/pipelines/{pipeline_name}/errors", response_model=List[ErrorItem])
-def get_pipeline_errors(pipeline_name: str, db: Session = Depends(get_db)):
-    if not db.query(Pipeline).filter(Pipeline.name == pipeline_name).first():
+def get_pipeline_errors(
+    pipeline_name: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ws = _workspace(current_user)
+    if not db.query(Pipeline).filter(
+        Pipeline.workspace_id == ws, Pipeline.name == pipeline_name
+    ).first():
         raise HTTPException(status_code=404, detail=f"Pipeline '{pipeline_name}' not found")
-    errors = db.query(Error).filter(Error.pipeline_name == pipeline_name).order_by(Error.detected_at.desc()).all()
+    errors = (
+        db.query(Error)
+        .filter(Error.workspace_id == ws, Error.pipeline_name == pipeline_name)
+        .order_by(Error.detected_at.desc())
+        .all()
+    )
     return [{"pipeline": e.pipeline_name, "error": e.error_type, "rootCause": e.root_cause, "fix": e.fix, "detectedAt": e.detected_at} for e in errors]
 
 @app.get("/pipelines/{pipeline_name}/runs", response_model=List[RunItem])
-def get_pipeline_runs(pipeline_name: str, db: Session = Depends(get_db)):
-    if not db.query(Pipeline).filter(Pipeline.name == pipeline_name).first():
+def get_pipeline_runs(
+    pipeline_name: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ws = _workspace(current_user)
+    if not db.query(Pipeline).filter(
+        Pipeline.workspace_id == ws, Pipeline.name == pipeline_name
+    ).first():
         raise HTTPException(status_code=404, detail=f"Pipeline '{pipeline_name}' not found")
     runs = (
         db.query(PipelineRun)
-        .filter(PipelineRun.pipeline_name == pipeline_name)
+        .filter(
+            PipelineRun.workspace_id  == ws,
+            PipelineRun.pipeline_name == pipeline_name,
+        )
         .order_by(PipelineRun.created_at.desc())
         .all()
     )
@@ -278,3 +379,141 @@ def get_pipeline_runs(pipeline_name: str, db: Session = Depends(get_db)):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# ── Runbook ingestion endpoints ────────────────────────────────────────────────
+
+AI_ENGINE_URL = os.getenv("AI_ENGINE_URL", "http://localhost:8002")
+
+import requests as _requests
+from runbook_ingester import ingest_runbook_text
+
+
+class RunbookIngestRequest(BaseModel):
+    """
+    Payload for POST /runbooks/ingest.
+
+    Send the raw markdown text of one runbook file. The API will chunk it,
+    embed each chunk via the ai-engine, and store everything in runbook_chunks.
+    Subsequent calls with the same source_file replace the existing chunks
+    (delete-then-insert), so re-ingestion after edits is safe.
+    """
+    source_file:   str   # e.g. "spark_oom_runbook.md"
+    markdown_text: str   # full file contents
+
+
+class RunbookIngestResponse(BaseModel):
+    source_file:    str
+    chunks_stored:  int
+    chunks_failed:  int   # chunks where embedding call failed (stored with null embedding)
+
+
+@app.post("/runbooks/ingest", response_model=RunbookIngestResponse, status_code=201)
+def ingest_runbook(
+    req: RunbookIngestRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Ingest a markdown runbook into the RAG vector store.
+
+    Pipeline:
+      1. Chunk the markdown by headers + paragraph boundaries.
+      2. Embed each chunk via ai-engine POST /embed (sentence-transformers).
+      3. Delete existing chunks for this (workspace, source_file) pair.
+      4. Bulk insert new chunks with their embeddings.
+
+    The chunks become immediately available for retrieval on the next error event.
+    """
+    ws = _workspace(current_user)
+
+    # Step 1: chunk
+    rows = ingest_runbook_text(
+        markdown_text = req.markdown_text,
+        source_file   = req.source_file,
+        workspace_id  = ws,
+    )
+
+    if not rows:
+        raise HTTPException(status_code=422, detail="No valid chunks extracted from markdown.")
+
+    # Step 2: embed each chunk (call ai-engine)
+    stored = 0
+    failed = 0
+
+    for row in rows:
+        try:
+            resp = _requests.post(
+                f"{AI_ENGINE_URL}/embed",
+                json={"text": row.chunk_text},
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                row.embedding = resp.json().get("embedding")
+        except Exception as e:
+            print(f"[api-layer] Runbook embed failed for chunk {row.chunk_index}: {e}")
+
+    # Step 3: delete old chunks for this (workspace, source_file)
+    db.query(RunbookChunk).filter(
+        RunbookChunk.workspace_id == ws,
+        RunbookChunk.source_file  == req.source_file,
+    ).delete(synchronize_session=False)
+
+    # Step 4: bulk insert
+    for row in rows:
+        db_chunk = RunbookChunk(
+            workspace_id  = row.workspace_id,
+            source_file   = row.source_file,
+            chunk_index   = row.chunk_index,
+            section_title = row.section_title,
+            chunk_text    = row.chunk_text,
+            created_at    = row.created_at,
+            embedding     = row.embedding,
+        )
+        db.add(db_chunk)
+        if row.embedding:
+            stored += 1
+        else:
+            failed += 1
+
+    db.commit()
+
+    return {
+        "source_file":   req.source_file,
+        "chunks_stored": stored + failed,   # all chunks stored; some without embedding
+        "chunks_failed": failed,
+    }
+
+
+@app.get("/runbooks", response_model=List[dict])
+def list_runbooks(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    List all ingested runbook files for this workspace, with chunk counts.
+    """
+    ws = _workspace(current_user)
+    from sqlalchemy import func
+    rows = (
+        db.query(RunbookChunk.source_file, func.count(RunbookChunk.id).label("chunks"))
+        .filter(RunbookChunk.workspace_id == ws)
+        .group_by(RunbookChunk.source_file)
+        .all()
+    )
+    return [{"source_file": r.source_file, "chunks": r.chunks} for r in rows]
+
+
+@app.delete("/runbooks/{source_file}", status_code=204)
+def delete_runbook(
+    source_file: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delete all chunks for a given runbook file from this workspace."""
+    ws = _workspace(current_user)
+    db.query(RunbookChunk).filter(
+        RunbookChunk.workspace_id == ws,
+        RunbookChunk.source_file  == source_file,
+    ).delete(synchronize_session=False)
+    db.commit()
