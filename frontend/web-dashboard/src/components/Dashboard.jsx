@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { filterDashboardItems } from './dashboardData'
 import CreatePipelineForm from './CreatePipelineForm'
-
-export default function Dashboard({ onBack }) {
+import { formatTimestamp, sortErrors, TIMEZONE_OPTIONS } from '../utils/dashboardUtils'
+export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme }) {
   const [query, setQuery]                       = useState('')
   const [data, setData]                         = useState({ pipelines: [], errors: [] })
   const [loading, setLoading]                   = useState(true)
@@ -11,6 +11,8 @@ export default function Dashboard({ onBack }) {
   const [selectedPipeline, setSelectedPipeline] = useState(null)
   const [pipelineErrors, setPipelineErrors]     = useState([])
   const [detailLoading, setDetailLoading]       = useState(false)
+  const [errorSort, setErrorSort]               = useState('timestamp') // 'timestamp' | 'pipeline'
+  const [timezone, setTimezone]                 = useState('local')
 
   const fetchData = async (isInitial = false) => {
     if (isInitial) setLoading(true)
@@ -49,10 +51,10 @@ export default function Dashboard({ onBack }) {
 
   const closeModal = () => { setSelectedPipeline(null); setPipelineErrors([]) }
 
-  const filteredItems = useMemo(
-    () => filterDashboardItems(query, data.pipelines, data.errors),
-    [query, data]
-  )
+  const filteredItems = useMemo(() => {
+    const base = filterDashboardItems(query, data.pipelines, data.errors)
+    return { ...base, errors: sortErrors(base.errors, errorSort) }
+  }, [query, data, errorSort])
 
   const failureCount = data.pipelines.filter(p => p.status === 'Failed').length
 
@@ -89,7 +91,7 @@ export default function Dashboard({ onBack }) {
               <div>
                 <h2 className="db-modal-title">{selectedPipeline.name}</h2>
                 <div className="db-modal-meta">
-                  <span className="db-modal-meta-text">Last run: {selectedPipeline.lastRun}</span>
+                  <span className="db-modal-meta-text">Last run: {formatTimestamp(selectedPipeline.lastRun, timezone) ?? selectedPipeline.lastRun}</span>
                   <span className={selectedPipeline.status === 'Failed' ? 'db-chip db-chip-failed' : 'db-chip db-chip-success'}>
                     <span className="db-chip-dot" />
                     {selectedPipeline.status}
@@ -110,7 +112,14 @@ export default function Dashboard({ onBack }) {
               ) : (
                 pipelineErrors.map((item, i) => (
                   <div key={i} className="db-error-card">
-                    <p className="db-error-type">⚠ {item.error}</p>
+                    <div className="db-analysis-card-header">
+                      <p className="db-error-type">⚠ {item.error}</p>
+                      {item.detectedAt && (
+                        <span className="db-timestamp" title={item.detectedAt}>
+                          🕐 {formatTimestamp(item.detectedAt, timezone)}
+                        </span>
+                      )}
+                    </div>
                     <p className="db-error-cause">{item.rootCause}</p>
                     <div className="db-fix-block">
                       <span className="db-fix-icon">💡</span>
@@ -124,17 +133,20 @@ export default function Dashboard({ onBack }) {
         </div>
       )}
 
-      <header className="db-header">
-        <div className="db-header-inner">
-          <div className="db-header-left">
-            {onBack && <button className="db-back-btn" onClick={onBack}>← Home</button>}
-            <span className="db-logo-icon">⚙️</span>
-            <span className="db-logo-text">AI Pipeline Debugger</span>
-            <span className="db-badge">Dashboard</span>
+      <header className="dashboard-header">
+        <div className="header-inner">
+          <div className="header-brand">
+            <div className="header-subtitle" style={{ marginTop: 0 }}>Dashboard</div>
           </div>
-          <div className="db-header-right">
+          <div className="header-actions">
             <span className="db-live-dot" title="Live — polling every 5s" />
             <span className="db-live-label">Live</span>
+            {user && <span className="db-user-pill">{user.name || user.email}</span>}
+            <button className="theme-toggle" onClick={toggleTheme} title="Toggle dark/light mode">
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
+            {onBack && <button className="dashboard-button" onClick={onBack}>← Home</button>}
+            <button className="dashboard-button btn-ghost" onClick={onSignOut}>Sign out</button>
           </div>
         </div>
       </header>
@@ -190,7 +202,7 @@ export default function Dashboard({ onBack }) {
             <div key={pipeline.name} className="db-pipeline-card" onClick={() => handlePipelineClick(pipeline)}>
               <div>
                 <p className="db-pipeline-name">{pipeline.name}</p>
-                <p className="db-pipeline-meta">Last run: {pipeline.lastRun}</p>
+                <p className="db-pipeline-meta">Last run: {formatTimestamp(pipeline.lastRun, timezone) ?? pipeline.lastRun}</p>
               </div>
               <span className={pipeline.status === 'Failed' ? 'db-chip db-chip-failed' : 'db-chip db-chip-success'}>
                 <span className="db-chip-dot" />
@@ -203,13 +215,43 @@ export default function Dashboard({ onBack }) {
         <section className="db-section">
           <div className="db-section-header">
             <h2 className="db-section-title">AI Root Cause Analysis</h2>
-            <span className="db-count-badge">{filteredItems.errors.length}</span>
+            <div className="db-section-header-right">
+              <span className="db-count-badge">{filteredItems.errors.length}</span>
+              <div className="db-sort-toggle">
+                <button
+                  className={errorSort === 'timestamp' ? 'db-sort-btn db-sort-btn-active' : 'db-sort-btn'}
+                  onClick={() => setErrorSort('timestamp')}
+                >🕐 Time</button>
+                <button
+                  className={errorSort === 'pipeline' ? 'db-sort-btn db-sort-btn-active' : 'db-sort-btn'}
+                  onClick={() => setErrorSort('pipeline')}
+                >A→Z Pipeline</button>
+              </div>
+              <select
+                className="db-tz-select"
+                value={timezone}
+                onChange={e => setTimezone(e.target.value)}
+                title="Display timezone"
+              >
+                {TIMEZONE_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
           </div>
           {filteredItems.errors.length === 0 ? (
             <div className="db-empty"><p>No errors matched your search.</p></div>
           ) : filteredItems.errors.map((item, i) => (
             <div key={i} className="db-analysis-card">
-              <p className="db-analysis-pipeline">{item.pipeline}</p>
+              <div className="db-analysis-card-header">
+                <p className="db-analysis-pipeline">{item.pipeline}</p>
+                {item.detectedAt && (
+                  <span className="db-timestamp" title={item.detectedAt}>
+                    🕐 {formatTimestamp(item.detectedAt, timezone)}
+                  </span>
+                )}
+              </div>
+              {i === 0 && <span className="db-latest-badge">Latest</span>}
               <p className="db-error-type">⚠ {item.error}</p>
               <p className="db-error-cause">{item.rootCause}</p>
               <div className="db-fix-block">

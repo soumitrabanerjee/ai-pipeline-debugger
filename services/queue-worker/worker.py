@@ -16,6 +16,7 @@ import sys
 import os
 import requests
 import redis
+from datetime import datetime, timezone
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.append(PROJECT_ROOT)
@@ -94,9 +95,12 @@ def process_event(event_id: str, fields: dict):
             Error.error_type == error_type,
         ).first()
 
+        now = datetime.now(timezone.utc).isoformat()
+
         if existing:
             existing.root_cause = ai_result.get("root_cause", "Pending")
             existing.fix = ai_result.get("suggested_fix", "Pending")
+            existing.detected_at = now
             print(f"[worker] Updated existing error '{error_type}' for pipeline '{job_id}'")
         else:
             db.add(Error(
@@ -104,6 +108,7 @@ def process_event(event_id: str, fields: dict):
                 error_type=error_type,
                 root_cause=ai_result.get("root_cause", "Pending"),
                 fix=ai_result.get("suggested_fix", "Pending"),
+                detected_at=now,
             ))
             print(f"[worker] Inserted new error '{error_type}' for pipeline '{job_id}'")
 

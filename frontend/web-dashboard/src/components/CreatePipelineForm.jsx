@@ -9,49 +9,117 @@ function CopyIcon() {
   )
 }
 
-const WEBHOOK_URL   = 'http://localhost:8003/webhook'
+const WEBHOOK_BASE = 'http://localhost:8003/webhook'
+const INGEST_BASE  = 'http://localhost:8000/ingest'
 
 function snippets(jobId) {
   const id = jobId || 'my-pipeline'
   return {
-    airflow: `# In your DAG's default_args:
+    airflow: `# airflow/dags/${id}_dag.py
 import requests
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+from datetime import datetime
 
-def _notify_failure(context):
-    requests.post("${WEBHOOK_URL}/airflow", json={
+PIPELEX_URL = "${WEBHOOK_BASE}/airflow"
+
+def _on_failure(context):
+    """Send failure event to PipeLex for AI root-cause analysis."""
+    requests.post(PIPELEX_URL, json={
         "dag_id":    context["dag"].dag_id,
         "run_id":    context["run_id"],
         "task_id":   context["task_instance"].task_id,
-        "exception": str(context.get("exception", "")),
+        "exception": str(context.get("exception", "Unknown error")),
     }, timeout=5)
 
-default_args = {
-    "on_failure_callback": _notify_failure,
-    ...
-}`,
-    spark: `# 1. Start the log agent (watches Spark log output)
+with DAG(
+    dag_id="${id}",
+    start_date=datetime(2026, 1, 1),
+    schedule="@daily",
+    default_args={"on_failure_callback": _on_failure},
+    catchup=False,
+) as dag:
+    # your tasks here
+    pass`,
+
+    spark: `# ── Option A: Log Agent (file-watcher, recommended) ──────────────
+
+# Terminal 1 — start the agent; it watches for ERROR lines in real time
 python3 services/log-collection-layer/agent.py \\
   --watch-dir /tmp/spark-logs \\
-  --job-id    ${id}
+  --job-id    ${id} \\
+  --ingest-url ${INGEST_BASE}
 
-# 2. Run your Spark job with stderr redirected to that dir
-python3 your_spark_job.py 2>&1 | tee /tmp/spark-logs/${id}.log`,
-    generic: `curl -X POST ${WEBHOOK_URL}/generic \\
+# Terminal 2 — run your PySpark job and tee stderr to the watched dir
+spark-submit your_job.py 2>&1 | tee /tmp/spark-logs/${id}.log
+# or for a plain PySpark script:
+python3 your_spark_job.py 2>&1 | tee /tmp/spark-logs/${id}.log
+
+
+# ── Option B: Generic webhook (one-liner, no agent needed) ────────
+
+curl -X POST ${WEBHOOK_BASE}/generic \\
   -H "Content-Type: application/json" \\
   -d '{
     "pipeline": "${id}",
     "level":    "ERROR",
-    "message":  "Your error message here",
-    "timestamp":"2026-03-10T10:00:00Z"
+    "message":  "PythonException: ValueError: could not convert string to float"
   }'`,
+
+    generic: `# Works with any system that can HTTP POST — no SDK required.
+# "timestamp" is optional; the server fills it in automatically.
+
+curl -X POST ${WEBHOOK_BASE}/generic \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "pipeline": "${id}",
+    "level":    "ERROR",
+    "message":  "Your error message here"
+  }'
+
+# Python example
+import requests
+requests.post("${WEBHOOK_BASE}/generic", json={
+    "pipeline": "${id}",
+    "level":    "ERROR",
+    "message":  "Your error message here",
+    # "run_id": "optional-run-id",
+    # "timestamp": "2026-03-14T10:00:00Z",  # optional
+}, timeout=5)`,
+
+    prefect: `# prefect_flow.py
+import requests
+from prefect import flow, task
+from prefect.states import Failed
+
+PIPELEX_URL = "${WEBHOOK_BASE}/generic"
+
+def _notify_failure(flow_name: str, run_id: str, error: str):
+    requests.post(PIPELEX_URL, json={
+        "pipeline": flow_name,
+        "run_id":   run_id,
+        "level":    "ERROR",
+        "message":  error,
+    }, timeout=5)
+
+@flow(name="${id}")
+def my_flow():
+    try:
+        # your Prefect tasks here
+        pass
+    except Exception as e:
+        import prefect.runtime.flow_run as fr
+        _notify_failure("${id}", str(fr.id), str(e))
+        raise`,
   }
 }
 
-const SOURCE_LABELS = {
-  airflow: 'Apache Airflow',
-  spark:   'PySpark / Spark',
-  generic: 'Generic / Webhook',
-}
+const SOURCES = [
+  { key: 'airflow', label: '🌬️ Apache Airflow' },
+  { key: 'spark',   label: '⚡ PySpark / Spark' },
+  { key: 'generic', label: '🔗 Generic / curl'  },
+  { key: 'prefect', label: '🔷 Prefect'          },
+]
 
 export default function CreatePipelineForm({ onPipelineCreated }) {
   const [jobId,  setJobId]  = useState('')
@@ -68,16 +136,16 @@ export default function CreatePipelineForm({ onPipelineCreated }) {
 
   return (
     <div className="db-form-card">
-      <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#f1f5f9', margin: '0 0 0.3rem' }}>
+      <h3 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--text)', margin: '0 0 0.3rem' }}>
         Connect a Pipeline
       </h3>
-      <p style={{ fontSize: '0.825rem', color: '#64748b', margin: '0 0 1.5rem', lineHeight: 1.6 }}>
-        Pipelines appear automatically once the first event is received. Copy the snippet below into your pipeline.
+      <p style={{ fontSize: '0.825rem', color: 'var(--text-muted)', margin: '0 0 1.5rem', lineHeight: 1.6 }}>
+        Pipelines appear automatically once the first event is received. Copy the snippet for your stack.
       </p>
 
       {/* Pipeline ID */}
       <div style={{ marginBottom: '1.25rem' }}>
-        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.4rem' }}>
+        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.4rem' }}>
           Pipeline ID
         </label>
         <input
@@ -91,11 +159,11 @@ export default function CreatePipelineForm({ onPipelineCreated }) {
 
       {/* Source tabs */}
       <div style={{ marginBottom: '1.25rem' }}>
-        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.4rem' }}>
+        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
           Pipeline Type
         </label>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          {Object.entries(SOURCE_LABELS).map(([key, label]) => (
+          {SOURCES.map(({ key, label }) => (
             <button
               key={key}
               type="button"
@@ -112,7 +180,7 @@ export default function CreatePipelineForm({ onPipelineCreated }) {
       {/* Code snippet */}
       <div style={{ marginBottom: '1.25rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             Integration Snippet
           </label>
           <button
@@ -125,13 +193,13 @@ export default function CreatePipelineForm({ onPipelineCreated }) {
           </button>
         </div>
         <pre style={{
-          background: 'rgba(0,0,0,0.4)',
-          border: '1px solid rgba(255,255,255,0.07)',
+          background: 'var(--bg-input)',
+          border: '1px solid var(--border)',
           borderRadius: '10px',
           padding: '1rem 1.25rem',
           fontSize: '0.75rem',
           fontFamily: "'Fira Code', 'SF Mono', Consolas, monospace",
-          color: '#94a3b8',
+          color: 'var(--text-secondary)',
           overflowX: 'auto',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
@@ -144,20 +212,20 @@ export default function CreatePipelineForm({ onPipelineCreated }) {
 
       {/* What happens next */}
       <div style={{
-        background: 'rgba(99,102,241,0.05)',
-        border: '1px solid rgba(99,102,241,0.15)',
+        background: 'var(--accent-subtle)',
+        border: '1px solid rgba(99,102,241,0.2)',
         borderRadius: '10px',
         padding: '0.875rem 1rem',
         fontSize: '0.8rem',
-        color: '#94a3b8',
+        color: 'var(--text-secondary)',
         lineHeight: 1.65,
         marginBottom: '1.25rem',
       }}>
-        <strong style={{ color: '#f1f5f9', display: 'block', marginBottom: '0.4rem' }}>What happens next</strong>
+        <strong style={{ color: 'var(--text)', display: 'block', marginBottom: '0.4rem' }}>What happens next</strong>
         <ol style={{ margin: 0, paddingLeft: '1.2rem' }}>
-          <li>Your pipeline sends an error event to the ingestion API</li>
-          <li>The queue worker runs AI analysis via Ollama (llama3.1:8b)</li>
-          <li><strong style={{ color: '#f1f5f9' }}>{jobId || 'your-pipeline'}</strong> appears in the dashboard automatically</li>
+          <li>Your pipeline sends an error event to the PipeLex ingestion API</li>
+          <li>The queue worker runs AI root-cause analysis via Claude (claude-haiku-4-5)</li>
+          <li><strong style={{ color: 'var(--text)' }}>{jobId || 'your-pipeline'}</strong> appears in the dashboard with a fix suggestion</li>
         </ol>
       </div>
 

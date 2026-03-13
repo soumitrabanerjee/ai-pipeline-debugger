@@ -22,8 +22,14 @@ export const errors = [
 export function filterDashboardItems(query, currentPipelines = pipelines, currentErrors = errors) {
   const normalizedQuery = query.trim().toLowerCase()
 
+  // Only show errors for pipelines that are still failing
+  const failedPipelineNames = new Set(
+    currentPipelines.filter(p => p.status === 'Failed').map(p => p.name)
+  )
+  const activeErrors = currentErrors.filter(e => failedPipelineNames.has(e.pipeline))
+
   if (!normalizedQuery) {
-    return { pipelines: currentPipelines, errors: currentErrors }
+    return { pipelines: currentPipelines, errors: activeErrors }
   }
 
   const filteredPipelines = currentPipelines.filter((pipeline) => {
@@ -34,7 +40,7 @@ export function filterDashboardItems(query, currentPipelines = pipelines, curren
     )
   })
 
-  const filteredErrors = currentErrors.filter((item) => {
+  const filteredErrors = activeErrors.filter((item) => {
     return (
       item.pipeline.toLowerCase().includes(normalizedQuery) ||
       item.error.toLowerCase().includes(normalizedQuery) ||
