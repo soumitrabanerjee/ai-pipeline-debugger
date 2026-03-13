@@ -1,0 +1,10 @@
+services:
+  ai-engine:
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+    depends_on: {}
+
+  frontend:
+    volumes:
+      - ./frontend/web-dashboard/src:/app/src        # live edits without rebuild
+      - ./frontend/web-dashboard/index.html:/app/index.html

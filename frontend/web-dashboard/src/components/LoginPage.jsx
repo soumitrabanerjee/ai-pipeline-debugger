@@ -1,0 +1,186 @@
+import { useState } from 'react'
+
+const API = 'http://localhost:8001'
+
+export default function LoginPage({ onLogin, onBack }) {
+  const [tab, setTab]           = useState('signin')
+  const [email, setEmail]       = useState('')
+  const [password, setPassword] = useState('')
+  const [name, setName]         = useState('')
+  const [error, setError]       = useState(null)
+  const [loading, setLoading]   = useState(false)
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    setError(null)
+    if (!email || !password) { setError('Email and password are required.'); return }
+    if (tab === 'signup' && !name) { setError('Name is required.'); return }
+
+    setLoading(true)
+    try {
+      const endpoint = tab === 'signup' ? '/auth/register' : '/auth/login'
+      const body     = tab === 'signup'
+        ? { email, name, password }
+        : { email, password }
+
+      const res = await fetch(`${API}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.detail || 'Something went wrong. Please try again.')
+        return
+      }
+
+      onLogin(data.token, data.user)
+    } catch {
+      setError('Could not reach the server. Make sure the API is running.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleGoogleMock = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      // Try login first; if no account, register
+      const loginRes = await fetch(`${API}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'demo@google.com', password: 'google-oauth-mock' }),
+      })
+      if (loginRes.ok) {
+        const data = await loginRes.json()
+        onLogin(data.token, data.user)
+        return
+      }
+      const regRes = await fetch(`${API}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'demo@google.com', name: 'Demo User', password: 'google-oauth-mock' }),
+      })
+      const data = await regRes.json()
+      if (!regRes.ok) { setError(data.detail || 'Google sign-in failed.'); return }
+      onLogin(data.token, data.user)
+    } catch {
+      setError('Could not reach the server.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="auth-shell">
+      <div className="auth-glow auth-glow-left" />
+      <div className="auth-glow auth-glow-right" />
+
+      <nav className="lp-nav">
+        <div className="lp-nav-inner">
+          <div className="lp-logo">
+            <div className="lp-logo-img-wrap">
+              <img src="/pipelex.png" alt="PipeLex" className="lp-logo-img" />
+            </div>
+          </div>
+          <button className="lp-btn-ghost" onClick={onBack}>← Back</button>
+        </div>
+      </nav>
+
+      <div className="auth-center">
+        <div className="auth-card">
+          <div className="auth-card-header">
+            <h2 className="auth-title">
+              {tab === 'signin' ? 'Welcome back' : 'Create your account'}
+            </h2>
+            <p className="auth-sub">
+              {tab === 'signin'
+                ? 'Sign in to access your pipeline dashboard'
+                : 'Start debugging pipelines in minutes'}
+            </p>
+          </div>
+
+          <div className="auth-tabs">
+            <button
+              className={tab === 'signin' ? 'auth-tab auth-tab-active' : 'auth-tab'}
+              onClick={() => { setTab('signin'); setError(null) }}
+            >Sign In</button>
+            <button
+              className={tab === 'signup' ? 'auth-tab auth-tab-active' : 'auth-tab'}
+              onClick={() => { setTab('signup'); setError(null) }}
+            >Sign Up</button>
+          </div>
+
+          <form className="auth-form" onSubmit={handleSubmit}>
+            {tab === 'signup' && (
+              <div className="auth-field">
+                <label className="auth-label">Full Name</label>
+                <input
+                  className="auth-input"
+                  type="text"
+                  placeholder="Ada Lovelace"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  autoComplete="name"
+                />
+              </div>
+            )}
+            <div className="auth-field">
+              <label className="auth-label">Email</label>
+              <input
+                className="auth-input"
+                type="email"
+                placeholder="you@company.com"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                autoComplete="email"
+              />
+            </div>
+            <div className="auth-field">
+              <label className="auth-label">Password</label>
+              <input
+                className="auth-input"
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                autoComplete={tab === 'signin' ? 'current-password' : 'new-password'}
+              />
+            </div>
+
+            {error && <p className="auth-error">{error}</p>}
+
+            <button className="lp-btn-primary auth-submit" type="submit" disabled={loading}>
+              {loading
+                ? <span className="auth-spinner" />
+                : tab === 'signin' ? 'Sign In →' : 'Create Account →'}
+            </button>
+          </form>
+
+          <div className="auth-divider"><span>or</span></div>
+
+          <button className="auth-oauth-btn" onClick={handleGoogleMock} disabled={loading}>
+            <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+              <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/>
+              <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
+              <path d="M3.964 10.707A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.707V4.961H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.039l3.007-2.332z" fill="#FBBC05"/>
+              <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.961L3.964 7.293C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+            </svg>
+            Continue with Google
+          </button>
+
+          {tab === 'signin' && (
+            <p className="auth-footer-note">
+              Don't have an account?{' '}
+              <button className="auth-link" onClick={() => { setTab('signup'); setError(null) }}>
+                Sign up free
+              </button>
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
