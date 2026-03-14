@@ -120,14 +120,14 @@ python3 -m pytest tests/ -v
 - [x] PostgreSQL migration (port 5433, shared across api-layer + ingestion-api)
 - [x] **Redis Queue** — ingestion returns 202 immediately; worker processes async
 - [x] **Pipeline Run History** — `PipelineRun` table, `GET /pipelines/{name}/runs` (newest-first)
-- [x] **Slack Alerting** — Block Kit messages after AI analysis; silent no-op if no webhook URL set
+- [x] **Multi-Channel Alerting** — Slack (Block Kit), Teams (MessageCard), Email (SMTP/HTML), PagerDuty (Events API v2); `send_alerts()` dispatcher fires all configured channels; silent no-op per channel when env var not set
 - [x] **Log Collection Layer** — three ingestion paths: agent.py, webhook_collector.py, simulator.py
 - [x] **Log Processing Layer wired into worker** — `extract_error()` → structured severity + summary → pipeline_context for Claude
 - [x] **Feature #2 — Advanced Deterministic Log Parsing** — `advanced_parser.py` replaces naive `split(":")` with full exception block assembly; handles Java stack traces (Caused-by chain walking, JVM frame filtering), Python tracebacks (user frame extraction), PySpark `PythonException` wrappers, Airflow task context; `ExceptionBlock.signature()` produces stable deduplication keys like `"EXECUTOR_FAILURE:PythonException"`; `to_debug_context()` emits signal-dense 1000-char context string for LLM; 16-entry exception catalogue maps classes to categories (OOM, DATA_TYPE, EXECUTOR_FAILURE, etc.) and severities (CRITICAL/ERROR/WARNING)
 - [x] **Feature #3 — RAG for Internal Runbooks** — `runbook_ingester.py` chunks Markdown runbooks on `##`/`###` headers with paragraph overflow splitting and 50-char overlap; `RunbookChunk` model in `shared/models.py`; `POST /runbooks/ingest` in api-layer embeds each chunk via ai-engine and upserts to `runbook_chunks` table; `ai-engine /retrieve` does dual-source KNN: past error incidents + runbook chunks; worker passes both to Claude; `rag_pipeline.build_debug_prompt()` surfaces both sources with runbook citation instruction; runbook sections take priority over generic incident history
 - [x] **Real Airflow integration** — `debugger_etl_pipeline` DAG triggers `on_failure_callback` → webhook → AI analysis
 - [x] **PySpark integration** — customer_etl.py with ZeroDivisionError; log agent + webhook dual ingestion
-- [x] **280 passing tests** (Root Cause Engine +45, raw log storage +14, rate limiting +22)
+- [x] **351 passing tests** (Root Cause Engine +45, raw log storage +14, rate limiting +22, multi-channel alerts +87)
 
 ---
 
@@ -148,7 +148,7 @@ python3 -m pytest tests/ -v
 | **Root Cause Engine** | ✅ Built | `build_hypotheses()` + `select_top()` called after AI analysis; 17-entry rule catalogue; rule wins when AI confidence < rule score |
 | API Layer | ✅ Built | — |
 | Web Dashboard | ✅ Built | Run history tab now live in pipeline modal |
-| Slack Alerts | ✅ Built | — |
+| Slack / Teams / Email / PagerDuty Alerts | ✅ Built | `send_alerts()` dispatcher; all 4 channels opt-in via env vars |
 
 ---
 
@@ -160,7 +160,7 @@ python3 -m pytest tests/ -v
 4. ~~**Root Cause Engine integration**~~ ✅ **DONE** — `build_hypotheses()` pools AI + rule hypotheses; `select_top()` picks highest score; 17-entry `_RULE_CATALOGUE` (OOM, EXECUTOR_FAILURE, SCHEMA_MISMATCH, NETWORK, PERMISSIONS, etc.); rule scores capped at 0.88 so high-confidence AI (≥0.90) always wins; fallback to raw AI result when no candidates; fixed pre-existing `_AIRFLOW_CTX_RE` bug in advanced_parser; 45 new tests (72 total in engine + worker + parser tests)
 5. ~~**Log Storage (raw)**~~ ✅ **DONE** — `raw_log TEXT` added to `Error` model + `ALTER TABLE errors ADD COLUMN IF NOT EXISTS raw_log TEXT` migration; scrubbed `message` stored on every insert/update (capped at 10 000 chars); `rawLog` exposed in `ErrorItem` schema and all `/dashboard` + `/pipelines/*/errors` responses; 14 new tests
 6. ~~**Rate limiting**~~ ✅ **DONE** — `slowapi` added to all API layer endpoints; tiered limits per endpoint class; `_apply_tiny_limits()` pattern for deterministic 429 tests; 22 new tests
-7. **Teams / Email / PagerDuty alerts** — expand beyond Slack
+7. ~~**Teams / Email / PagerDuty alerts**~~ ✅ **DONE** — `send_teams_alert()` (MessageCard), `send_email_alert()` (SMTP/HTML), `send_pagerduty_alert()` (Events API v2); `send_alerts()` dispatcher fires all configured channels; worker calls `send_alerts()` instead of `send_slack_alert()`; 87 tests across all 4 channels + dispatcher
 
 ---
 

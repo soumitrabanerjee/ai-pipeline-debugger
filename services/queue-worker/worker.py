@@ -14,7 +14,7 @@ Flow:
       ├─ 4. analyse with Claude + RAG context  (ai-engine /analyze)
       ├─ 4b. Root Cause Engine — build_hypotheses() + select_top()
       ├─ 5. upsert Error record + embedding to PostgreSQL
-      └─ 6. send Slack alert
+      └─ 6. multi-channel alerts (Slack / Teams / Email / PagerDuty)
 """
 
 import sys
@@ -32,7 +32,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from services.shared.models import Error
 from services.shared.scrubber import scrub
-from services.alerting.alerter import send_slack_alert
+from services.alerting.alerter import send_alerts
 from parser import extract_error
 from engine import build_hypotheses, select_top
 
@@ -248,9 +248,9 @@ def process_event(event_id: str, fields: dict):
     finally:
         db.close()
 
-    # ── 6. Slack alert ─────────────────────────────────────────────────────────
+    # ── 6. Multi-channel alerts ────────────────────────────────────────────────
     run_id = fields.get("run_id", "unknown")
-    send_slack_alert(
+    send_alerts(
         pipeline_name = job_id,
         run_id        = run_id,
         error_type    = error_type,
