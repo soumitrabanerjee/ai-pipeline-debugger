@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { WEBHOOK_URL, INGEST_URL } from '../config'
 
 function CopyIcon() {
   return (
@@ -9,8 +10,8 @@ function CopyIcon() {
   )
 }
 
-const WEBHOOK_BASE = 'http://localhost:8003/webhook'
-const INGEST_BASE  = 'http://localhost:8000/ingest'
+const WEBHOOK_BASE = WEBHOOK_URL
+const INGEST_BASE  = INGEST_URL
 
 function snippets(jobId) {
   const id = jobId || 'my-pipeline'
@@ -24,7 +25,7 @@ from datetime import datetime
 PIPELEX_URL = "${WEBHOOK_BASE}/airflow"
 
 def _on_failure(context):
-    """Send failure event to PipeLex for AI root-cause analysis."""
+    """Send failure event to PiPlex for AI root-cause analysis."""
     requests.post(PIPELEX_URL, json={
         "dag_id":    context["dag"].dag_id,
         "run_id":    context["run_id"],
@@ -223,7 +224,7 @@ export default function CreatePipelineForm({ onPipelineCreated }) {
       }}>
         <strong style={{ color: 'var(--text)', display: 'block', marginBottom: '0.4rem' }}>What happens next</strong>
         <ol style={{ margin: 0, paddingLeft: '1.2rem' }}>
-          <li>Your pipeline sends an error event to the PipeLex ingestion API</li>
+          <li>Your pipeline sends an error event to the PiPlex ingestion API</li>
           <li>The queue worker runs AI root-cause analysis via Claude (claude-haiku-4-5)</li>
           <li><strong style={{ color: 'var(--text)' }}>{jobId || 'your-pipeline'}</strong> appears in the dashboard with a fix suggestion</li>
         </ol>

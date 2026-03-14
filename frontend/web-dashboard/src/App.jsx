@@ -4,8 +4,7 @@ import HomePage     from './components/HomePage'
 import LoginPage    from './components/LoginPage'
 import PaymentPage  from './components/PaymentPage'
 import Dashboard    from './components/Dashboard'
-
-const API = 'http://localhost:8001'
+import { API_URL as API } from './config'
 
 export default function App() {
   const [page, setPage]       = useState(null)   // null = loading

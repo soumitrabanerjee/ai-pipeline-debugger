@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import PiPlexLogo from './PiPlexLogo'
 
 // ── Terminal animation lines ────────────────────────────────────────────────
 const TERMINAL_LINES = [
@@ -49,7 +50,7 @@ function TerminalWindow() {
         <span className="lp-dot lp-dot-red" />
         <span className="lp-dot lp-dot-yellow" />
         <span className="lp-dot lp-dot-green" />
-        <span className="lp-terminal-title">spark-student-analytics — PipeLex</span>
+        <span className="lp-terminal-title">spark-student-analytics — PiPlex</span>
       </div>
       <div className="lp-terminal-body" ref={containerRef}>
         {TERMINAL_LINES.slice(0, visibleCount).map((line, i) =>
@@ -101,7 +102,7 @@ export default function LandingPage({ onEnterDashboard, onLogin, onSignOut, user
         <div className="lp-nav-inner">
           <div className="lp-logo">
             <div className="lp-logo-img-wrap">
-              <img src="/pipelex.png" alt="PipeLex" className="lp-logo-img" />
+              <PiPlexLogo height={36} />
             </div>
           </div>
           <div className="lp-nav-links">
@@ -137,7 +138,7 @@ export default function LandingPage({ onEnterDashboard, onLogin, onSignOut, user
             your <span className="lp-gradient-text">pipelines fail</span>
           </h1>
           <p className="lp-hero-sub">
-            PipeLex captures errors from Airflow, Spark, and any data
+            PiPlex captures errors from Airflow, Spark, and any data
             pipeline — then uses Claude to diagnose the root cause and suggest
             a fix in seconds. 5 Docker services, one unified dashboard.
           </p>

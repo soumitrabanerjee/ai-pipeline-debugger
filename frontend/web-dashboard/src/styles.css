@@ -256,8 +256,8 @@ h1,h2,h3,h4,p { margin:0; }
   text-decoration: none;
 }
 .lp-logo-icon { font-size: 1.25rem; }
-.lp-logo-img-wrap { width:93px; height:93px; border-radius:50%; overflow:hidden; background:#000; flex-shrink:0; display:flex; align-items:center; justify-content:center; box-shadow:0 0 0 3px rgba(129,140,248,0.5), 0 4px 24px rgba(129,140,248,0.35); position:relative; z-index:101; transform:translate(-8px, 28px); }
-.lp-logo-img { width:93px; height:93px; object-fit:contain; display:block; }
+.lp-logo-img-wrap { display:flex; align-items:center; flex-shrink:0; }
+.lp-logo-img { height:36px; width:auto; display:block; }
 .lp-logo-text {
   font-size: 0.95rem;
   font-weight: 700;

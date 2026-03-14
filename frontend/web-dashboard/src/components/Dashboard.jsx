@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { filterDashboardItems } from './dashboardData'
 import CreatePipelineForm from './CreatePipelineForm'
 import { formatTimestamp, sortErrors, sortRuns, truncateRunId, TIMEZONE_OPTIONS } from '../utils/dashboardUtils'
+import PiPlexLogo from './PiPlexLogo'
+import { API_URL } from '../config'
 export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme }) {
   const [query, setQuery]                       = useState('')
   const [data, setData]                         = useState({ pipelines: [], errors: [] })
@@ -20,7 +22,7 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme 
     if (isInitial) setLoading(true)
     const token = localStorage.getItem('apd_token')
     try {
-      const res = await fetch('http://localhost:8001/dashboard', {
+      const res = await fetch(`${API_URL}/dashboard`, {
         headers: token ? { 'x-session-token': token } : {},
       })
       if (!res.ok) throw new Error('Failed to fetch dashboard data')
@@ -48,8 +50,8 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme 
     const headers = token ? { 'x-session-token': token } : {}
     try {
       const [errRes, runRes] = await Promise.all([
-        fetch(`http://localhost:8001/pipelines/${encodeURIComponent(pipeline.name)}/errors`, { headers }),
-        fetch(`http://localhost:8001/pipelines/${encodeURIComponent(pipeline.name)}/runs`,   { headers }),
+        fetch(`${API_URL}/pipelines/${encodeURIComponent(pipeline.name)}/errors`, { headers }),
+        fetch(`${API_URL}/pipelines/${encodeURIComponent(pipeline.name)}/runs`,   { headers }),
       ])
       setPipelineErrors(errRes.ok ? await errRes.json() : [])
       setPipelineRuns(runRes.ok  ? await runRes.json()  : [])
@@ -212,7 +214,8 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme 
       <header className="dashboard-header">
         <div className="header-inner">
           <div className="header-brand">
-            <div className="header-subtitle" style={{ marginTop: 0 }}>Dashboard</div>
+            <PiPlexLogo height={28} />
+            <div className="header-subtitle" style={{ marginTop: 0, borderLeft: '1px solid var(--border)', paddingLeft: '0.75rem' }}>Dashboard</div>
           </div>
           <div className="header-actions">
             <span className="db-live-dot" title="Live — polling every 5s" />

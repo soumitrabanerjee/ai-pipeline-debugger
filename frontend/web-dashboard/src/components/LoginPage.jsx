@@ -1,6 +1,6 @@
 import { useState } from 'react'
-
-const API = 'http://localhost:8001'
+import PiPlexLogo from './PiPlexLogo'
+import { API_URL as API } from '../config'
 
 export default function LoginPage({ onLogin, onBack }) {
   const [tab, setTab]           = useState('signin')
@@ -82,7 +82,7 @@ export default function LoginPage({ onLogin, onBack }) {
         <div className="lp-nav-inner">
           <div className="lp-logo">
             <div className="lp-logo-img-wrap">
-              <img src="/pipelex.png" alt="PipeLex" className="lp-logo-img" />
+              <PiPlexLogo height={36} />
             </div>
           </div>
           <button className="lp-btn-ghost" onClick={onBack}>← Back</button>

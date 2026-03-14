@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
 import { formatTimestamp } from '../utils/dashboardUtils'
+import PiPlexLogo from './PiPlexLogo'
+import { API_URL as API, WEBHOOK_URL, INGEST_URL } from '../config'
 
-const API = 'http://localhost:8001'
-
+const HOST = window.location.hostname
 const SERVICES = [
-  { name: 'Ingestion API',       port: 8000, url: 'http://localhost:8000/health' },
-  { name: 'API Layer',           port: 8001, url: 'http://localhost:8001/health' },
-  { name: 'AI Engine',           port: 8002, url: 'http://localhost:8002/health' },
-  { name: 'Webhook Collector',   port: 8003, url: 'http://localhost:8003/health' },
+  { name: 'Ingestion API',       port: 8000, url: `http://${HOST}:8000/health` },
+  { name: 'API Layer',           port: 8001, url: `http://${HOST}:8001/health` },
+  { name: 'AI Engine',           port: 8002, url: `http://${HOST}:8002/health` },
+  { name: 'Webhook Collector',   port: 8003, url: `http://${HOST}:8003/health` },
 ]
 
 function useServiceHealth() {
@@ -72,7 +73,8 @@ export default function HomePage({ user, onOpenDashboard, onSignOut, theme, togg
       <header className="dashboard-header">
         <div className="header-inner">
           <div className="header-brand">
-            <div className="header-subtitle" style={{ marginTop: 0 }}>Home</div>
+            <PiPlexLogo height={28} />
+            <div className="header-subtitle" style={{ marginTop: 0, borderLeft: '1px solid var(--border)', paddingLeft: '0.75rem' }}>Home</div>
           </div>
           <div className="header-actions">
             <span style={{ fontSize: '0.875rem', fontWeight: 500, color: 'var(--text-secondary)' }}>{user?.name || user?.email}</span>
@@ -221,13 +223,13 @@ export default function HomePage({ user, onOpenDashboard, onSignOut, theme, togg
               <div style={{ background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', padding: '0.75rem', border: '1px solid var(--border)' }}>
                 <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Airflow webhook URL</div>
                 <code style={{ fontSize: '0.78rem', color: 'var(--accent)', wordBreak: 'break-all' }}>
-                  http://localhost:8003/webhook/airflow
+                  {WEBHOOK_URL}/airflow
                 </code>
               </div>
               <div style={{ background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', padding: '0.75rem', border: '1px solid var(--border)' }}>
                 <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Generic webhook URL</div>
                 <code style={{ fontSize: '0.78rem', color: 'var(--accent)', wordBreak: 'break-all' }}>
-                  http://localhost:8003/webhook/generic
+                  {WEBHOOK_URL}/generic
                 </code>
               </div>
             </div>

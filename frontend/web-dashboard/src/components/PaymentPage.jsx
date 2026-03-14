@@ -1,6 +1,6 @@
 import { useState } from 'react'
-
-const API = 'http://localhost:8001'
+import PiPlexLogo from './PiPlexLogo'
+import { API_URL as API } from '../config'
 
 const PLANS = [
   {
@@ -104,7 +104,7 @@ export default function PaymentPage({ user, onPaymentComplete, onSignOut }) {
         <div className="auth-glow auth-glow-right" />
         <nav className="lp-nav">
           <div className="lp-nav-inner">
-            <div className="lp-logo"><div className="lp-logo-img-wrap"><img src="/pipelex.png" alt="PipeLex" className="lp-logo-img" /></div></div>
+            <div className="lp-logo"><div className="lp-logo-img-wrap"><PiPlexLogo height={36} /></div></div>
             <button className="lp-btn-ghost" onClick={onSignOut}>Sign out</button>
           </div>
         </nav>
@@ -129,7 +129,7 @@ export default function PaymentPage({ user, onPaymentComplete, onSignOut }) {
         <div className="lp-nav-inner">
           <div className="lp-logo">
             <div className="lp-logo-img-wrap">
-              <img src="/pipelex.png" alt="PipeLex" className="lp-logo-img" />
+              <PiPlexLogo height={36} />
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>

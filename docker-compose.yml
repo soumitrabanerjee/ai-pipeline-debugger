@@ -40,6 +40,7 @@ services:
       - "8001:8001"
     environment:
       - DATABASE_URL=postgresql://debugger:debugger@postgres:5432/pipeline_debugger
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:5173}
     depends_on:
       postgres:
         condition: service_healthy
