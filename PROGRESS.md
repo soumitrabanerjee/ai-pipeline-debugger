@@ -4,7 +4,7 @@
 
 Full-stack SaaS application: React frontend, five FastAPI backend services, Redis async queue, PostgreSQL + pgvector, Slack alerting, **multi-tenant isolation**, and **RAG-powered AI analysis** using sentence-transformers + pgvector KNN retrieval.
 
-**Live data only — no seed/test data. All services running via Docker Compose. 160 tests passing.**
+**Live data only — no seed/test data. All services running via Docker Compose. 351 tests passing.**
 
 ---
 
@@ -26,8 +26,8 @@ Message Queue                 ✅ BUILT
 (Redis Streams — log_events stream, consumer group, workspace_id in every message)
           │
           ▼
-Log Storage                   ⚠️  PARTIAL
-(PostgreSQL for metadata ✅ / raw log files = NOT stored)
+Log Storage                   ✅ BUILT
+(PostgreSQL for metadata + raw_log TEXT column on errors; scrubbed text stored ≤10 000 chars)
           │
           ▼
 Log Processing Layer          ✅ BUILT  [Feature #2]
@@ -57,12 +57,12 @@ API Layer                     ✅ BUILT
           │
      ┌────┴──────┐
      ▼            ▼
-Web Dashboard    Slack Alerts
+Web Dashboard    Multi-Channel Alerts
 ✅ BUILT         ✅ BUILT
 (React/Vite      (alerter.py —
- dark mode,       Slack webhook,
- modal,           fires after
- run history)     AI analysis)
+ dark mode,       Slack, Teams,
+ modal,           Email, PagerDuty
+ run history)     via send_alerts())
 ```
 
 ---
