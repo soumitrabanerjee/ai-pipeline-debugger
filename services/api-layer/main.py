@@ -4,18 +4,21 @@ import hashlib
 import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from fastapi import FastAPI, Depends, HTTPException, Header
+from fastapi import FastAPI, Depends, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.append(PROJECT_ROOT)
 sys.path.append(os.path.join(PROJECT_ROOT, 'services', 'log-processing-layer'))
 
-from services.shared.models import Base, Pipeline, PipelineRun, Error, User, RunbookChunk
+from services.shared.models import Base, Pipeline, PipelineRun, Error, User, RunbookChunk, ApiKey
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -39,6 +42,33 @@ def verify_password(password: str, stored: str) -> bool:
     except Exception:
         return False
 
+# ── API key helpers ────────────────────────────────────────────────────────────
+
+def generate_api_key() -> tuple[str, str, str]:
+    """
+    Generate a new API key.
+    Returns (full_key, prefix, sha256_hash).
+
+    Format: dpd_<64 lowercase hex chars>
+    Only the hash is stored; the full key is shown once and then discarded.
+    """
+    raw      = secrets.token_hex(32)          # 64 hex chars
+    full_key = f"dpd_{raw}"
+    prefix   = full_key[:12]                  # "dpd_" + 8 chars
+    key_hash = hashlib.sha256(full_key.encode()).hexdigest()
+    return full_key, prefix, key_hash
+
+def _set_rls_workspace(db: Session, workspace_id: str) -> None:
+    """
+    SET LOCAL app.workspace_id for the current transaction so PostgreSQL RLS
+    policies can enforce tenant isolation at the DB level.
+    No-op on SQLite (used in tests).
+    """
+    try:
+        db.execute(text("SET LOCAL app.workspace_id = :ws"), {"ws": workspace_id})
+    except Exception:
+        pass  # SQLite or non-PostgreSQL backend — RLS not supported
+
 # ── Pydantic schemas ───────────────────────────────────────────────────────────
 
 class PipelineStatus(BaseModel):
@@ -52,6 +82,7 @@ class ErrorItem(BaseModel):
     rootCause: str
     fix: str
     detectedAt: str | None = None
+    rawLog: str | None = None
 
 class RunItem(BaseModel):
     runId: str
@@ -61,6 +92,24 @@ class RunItem(BaseModel):
 class DashboardData(BaseModel):
     pipelines: List[PipelineStatus]
     errors: List[ErrorItem]
+
+class ApiKeyCreate(BaseModel):
+    name: str   # friendly label, e.g. "airflow-prod"
+
+class ApiKeyOut(BaseModel):
+    id:         int
+    name:       str
+    key_prefix: str   # first 12 chars — safe to display
+    created_at: str
+    is_active:  bool
+
+class ApiKeyCreated(BaseModel):
+    """Returned once on creation. key is NOT stored — show it to the user now."""
+    id:         int
+    name:       str
+    key:        str   # full dpd_... value — shown ONCE
+    key_prefix: str
+    created_at: str
 
 class RegisterRequest(BaseModel):
     email: str
@@ -92,6 +141,7 @@ async def lifespan(app: FastAPI):
     with engine.connect() as conn:
         # ── Column additions (safe: IF NOT EXISTS) ────────────────────────────
         conn.execute(text("ALTER TABLE errors         ADD COLUMN IF NOT EXISTS detected_at  VARCHAR"))
+        conn.execute(text("ALTER TABLE errors         ADD COLUMN IF NOT EXISTS raw_log      TEXT"))
         conn.execute(text("ALTER TABLE pipelines      ADD COLUMN IF NOT EXISTS workspace_id VARCHAR NOT NULL DEFAULT 'default'"))
         conn.execute(text("ALTER TABLE pipeline_runs  ADD COLUMN IF NOT EXISTS workspace_id VARCHAR NOT NULL DEFAULT 'default'"))
         conn.execute(text("ALTER TABLE errors         ADD COLUMN IF NOT EXISTS workspace_id VARCHAR NOT NULL DEFAULT 'default'"))
@@ -222,10 +272,56 @@ async def lifespan(app: FastAPI):
         # ── server_default for users.paid ─────────────────────────────────────
         conn.execute(text("ALTER TABLE users ALTER COLUMN paid SET DEFAULT false"))
 
+        # ── api_keys table ────────────────────────────────────────────────────
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id           SERIAL PRIMARY KEY,
+                workspace_id VARCHAR NOT NULL,
+                name         VARCHAR NOT NULL,
+                key_prefix   VARCHAR NOT NULL,
+                key_hash     VARCHAR NOT NULL,
+                created_at   VARCHAR NOT NULL,
+                is_active    BOOLEAN NOT NULL DEFAULT true,
+                CONSTRAINT uq_api_keys_workspace_name UNIQUE (workspace_id, name),
+                CONSTRAINT uq_api_keys_hash           UNIQUE (key_hash)
+            )
+        """))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_keys_workspace ON api_keys(workspace_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_keys_hash ON api_keys(key_hash)"))
+
+        # ── PostgreSQL Row-Level Security (defense-in-depth) ──────────────────
+        # Policies enforce workspace_id isolation at the DB layer, on top of
+        # the existing workspace_id filters in application queries.
+        # current_setting('app.workspace_id', true) returns NULL (not error) when
+        # unset, which means NO rows match — fail-safe behaviour.
+        try:
+            for tbl in ("pipelines", "pipeline_runs", "errors", "runbook_chunks"):
+                conn.execute(text(f"ALTER TABLE {tbl} ENABLE ROW LEVEL SECURITY"))
+                conn.execute(text(f"""
+                    DO $$ BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_policies
+                            WHERE tablename = '{tbl}' AND policyname = 'ws_isolation'
+                        ) THEN
+                            CREATE POLICY ws_isolation ON {tbl}
+                                USING (workspace_id = current_setting('app.workspace_id', true));
+                        END IF;
+                    END $$;
+                """))
+        except Exception as rls_err:
+            print(f"[api-layer] RLS setup skipped (non-PostgreSQL backend): {rls_err}")
+
         conn.commit()
     yield
 
+# ── Rate limiter ───────────────────────────────────────────────────────────────
+# Keys by client IP by default.  Storage: in-memory (single-instance).
+# For multi-instance deployments, switch to storage_uri="redis://..." .
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
+
 app = FastAPI(title="AI Pipeline Debugger API", version="0.2.0", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -267,7 +363,8 @@ def _workspace(user: User) -> str:
 # ── Auth endpoints ─────────────────────────────────────────────────────────────
 
 @app.post("/auth/register", response_model=AuthResponse, status_code=201)
-def register(req: RegisterRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def register(request: Request, req: RegisterRequest, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == req.email).first():
         raise HTTPException(status_code=409, detail="An account with this email already exists")
     token = secrets.token_urlsafe(32)
@@ -285,7 +382,8 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
     return {"token": token, "user": _user_out(user)}
 
 @app.post("/auth/login", response_model=AuthResponse)
-def login(req: LoginRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == req.email).first()
     if not user or not verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
@@ -295,11 +393,14 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     return {"token": user.session_token, "user": _user_out(user)}
 
 @app.get("/auth/me", response_model=UserOut)
-def me(current_user: User = Depends(get_current_user)):
+@limiter.limit("60/minute")
+def me(request: Request, current_user: User = Depends(get_current_user)):
     return _user_out(current_user)
 
 @app.post("/auth/payment", response_model=UserOut)
+@limiter.limit("10/minute")
 def complete_payment(
+    request: Request,
     req: PaymentRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -311,18 +412,22 @@ def complete_payment(
     return _user_out(current_user)
 
 @app.delete("/auth/session", status_code=204)
-def sign_out(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+@limiter.limit("20/minute")
+def sign_out(request: Request, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     current_user.session_token = None
     db.commit()
 
 # ── Dashboard endpoints ────────────────────────────────────────────────────────
 
 @app.get("/dashboard", response_model=DashboardData)
+@limiter.limit("120/minute")
 def get_dashboard_data(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    ws        = _workspace(current_user)
+    ws = _workspace(current_user)
+    _set_rls_workspace(db, ws)
     pipelines = db.query(Pipeline).filter(Pipeline.workspace_id == ws).all()
     errors    = (
         db.query(Error)
@@ -332,16 +437,19 @@ def get_dashboard_data(
     )
     return {
         "pipelines": [{"name": p.name, "status": p.status, "lastRun": p.last_run} for p in pipelines],
-        "errors":    [{"pipeline": e.pipeline_name, "error": e.error_type, "rootCause": e.root_cause, "fix": e.fix, "detectedAt": e.detected_at} for e in errors],
+        "errors":    [{"pipeline": e.pipeline_name, "error": e.error_type, "rootCause": e.root_cause, "fix": e.fix, "detectedAt": e.detected_at, "rawLog": e.raw_log} for e in errors],
     }
 
 @app.get("/pipelines/{pipeline_name}/errors", response_model=List[ErrorItem])
+@limiter.limit("120/minute")
 def get_pipeline_errors(
+    request: Request,
     pipeline_name: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     ws = _workspace(current_user)
+    _set_rls_workspace(db, ws)
     if not db.query(Pipeline).filter(
         Pipeline.workspace_id == ws, Pipeline.name == pipeline_name
     ).first():
@@ -352,15 +460,18 @@ def get_pipeline_errors(
         .order_by(Error.detected_at.desc())
         .all()
     )
-    return [{"pipeline": e.pipeline_name, "error": e.error_type, "rootCause": e.root_cause, "fix": e.fix, "detectedAt": e.detected_at} for e in errors]
+    return [{"pipeline": e.pipeline_name, "error": e.error_type, "rootCause": e.root_cause, "fix": e.fix, "detectedAt": e.detected_at, "rawLog": e.raw_log} for e in errors]
 
 @app.get("/pipelines/{pipeline_name}/runs", response_model=List[RunItem])
+@limiter.limit("120/minute")
 def get_pipeline_runs(
+    request: Request,
     pipeline_name: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     ws = _workspace(current_user)
+    _set_rls_workspace(db, ws)
     if not db.query(Pipeline).filter(
         Pipeline.workspace_id == ws, Pipeline.name == pipeline_name
     ).first():
@@ -377,8 +488,105 @@ def get_pipeline_runs(
     return [{"runId": r.run_id, "status": r.status, "createdAt": r.created_at} for r in runs]
 
 @app.get("/health")
-def health():
+@limiter.limit("300/minute")
+def health(request: Request):
     return {"status": "ok"}
+
+
+# ── API key endpoints ──────────────────────────────────────────────────────────
+
+@app.post("/api-keys", response_model=ApiKeyCreated, status_code=201)
+@limiter.limit("20/minute")
+def create_api_key(
+    request: Request,
+    req: ApiKeyCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Generate a new workspace-scoped API key.
+
+    The full key is returned ONCE in this response and cannot be retrieved
+    again — store it securely (e.g. in a secrets manager or env var).
+    Subsequent calls to GET /api-keys show only the first 12 chars (prefix).
+    """
+    ws = _workspace(current_user)
+
+    if db.query(ApiKey).filter(
+        ApiKey.workspace_id == ws,
+        ApiKey.name == req.name,
+        ApiKey.is_active == True,
+    ).first():
+        raise HTTPException(status_code=409, detail=f"An active key named '{req.name}' already exists")
+
+    full_key, prefix, key_hash = generate_api_key()
+    now = datetime.now(timezone.utc).isoformat()
+
+    key_record = ApiKey(
+        workspace_id = ws,
+        name         = req.name,
+        key_prefix   = prefix,
+        key_hash     = key_hash,
+        created_at   = now,
+        is_active    = True,
+    )
+    db.add(key_record)
+    db.commit()
+    db.refresh(key_record)
+
+    return {
+        "id":         key_record.id,
+        "name":       key_record.name,
+        "key":        full_key,      # shown ONCE — not stored
+        "key_prefix": key_record.key_prefix,
+        "created_at": key_record.created_at,
+    }
+
+
+@app.get("/api-keys", response_model=List[ApiKeyOut])
+@limiter.limit("60/minute")
+def list_api_keys(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List all API keys for this workspace (active and revoked). Full key never shown."""
+    ws = _workspace(current_user)
+    keys = db.query(ApiKey).filter(ApiKey.workspace_id == ws).order_by(ApiKey.id).all()
+    return [
+        {
+            "id":         k.id,
+            "name":       k.name,
+            "key_prefix": k.key_prefix,
+            "created_at": k.created_at,
+            "is_active":  k.is_active,
+        }
+        for k in keys
+    ]
+
+
+@app.delete("/api-keys/{key_id}", status_code=204)
+@limiter.limit("20/minute")
+def revoke_api_key(
+    request: Request,
+    key_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Revoke an API key (soft delete — is_active = False).
+    The key record is retained for audit; revoked keys are immediately rejected
+    on all endpoints that validate x-api-key.
+    """
+    ws = _workspace(current_user)
+    key_record = db.query(ApiKey).filter(
+        ApiKey.id == key_id,
+        ApiKey.workspace_id == ws,
+    ).first()
+    if not key_record:
+        raise HTTPException(status_code=404, detail="API key not found")
+    key_record.is_active = False
+    db.commit()
 
 
 # ── Runbook ingestion endpoints ────────────────────────────────────────────────
@@ -409,7 +617,9 @@ class RunbookIngestResponse(BaseModel):
 
 
 @app.post("/runbooks/ingest", response_model=RunbookIngestResponse, status_code=201)
+@limiter.limit("10/minute")
 def ingest_runbook(
+    request: Request,
     req: RunbookIngestRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -486,7 +696,9 @@ def ingest_runbook(
 
 
 @app.get("/runbooks", response_model=List[dict])
+@limiter.limit("60/minute")
 def list_runbooks(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -505,7 +717,9 @@ def list_runbooks(
 
 
 @app.delete("/runbooks/{source_file}", status_code=204)
+@limiter.limit("20/minute")
 def delete_runbook(
+    request: Request,
     source_file: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),

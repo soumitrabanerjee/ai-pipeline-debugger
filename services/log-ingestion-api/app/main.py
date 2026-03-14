@@ -1,18 +1,21 @@
 import sys
 import os
 import uuid
+import hashlib
 import redis as redis_lib
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException, Header
 from pydantic import BaseModel
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime, timezone
+from typing import Optional
 
 # Add project root to Python path
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(PROJECT_ROOT)
 
-from services.shared.models import Base, Pipeline, PipelineRun
+from services.shared.models import Base, Pipeline, PipelineRun, ApiKey
+from services.shared.scrubber import scrub_text
 
 app = FastAPI(title="Log Ingestion API", version="0.2.0")
 
@@ -51,15 +54,42 @@ def get_db():
         db.close()
 
 
+def _get_workspace_from_api_key(
+    x_api_key: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+) -> Optional[str]:
+    """
+    Optional x-api-key header validation.
+
+    - Absent header: returns None (callers fall back to payload workspace_id).
+    - Present but invalid/revoked: raises 401.
+    - Valid: returns the workspace_id bound to that key, overriding the payload.
+    """
+    if not x_api_key:
+        return None
+    key_hash = hashlib.sha256(x_api_key.encode()).hexdigest()
+    record = db.query(ApiKey).filter(
+        ApiKey.key_hash == key_hash,
+        ApiKey.is_active == True,
+    ).first()
+    if not record:
+        raise HTTPException(status_code=401, detail="Invalid or revoked API key")
+    return record.workspace_id
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/ingest", status_code=202)
-def ingest(event: LogEvent, db: Session = Depends(get_db)):
-    run_status   = "Failed" if event.level == "ERROR" else "Success"
-    workspace_id = event.workspace_id
+# ── Core ingest logic (no FastAPI Depends — safe to call from webhook handlers) ─
+
+def _do_ingest(event: LogEvent, workspace_id: str, db: Session) -> dict:
+    """
+    Persist pipeline + run metadata and publish to Redis.
+    workspace_id is passed explicitly so callers control which tenant is written to.
+    """
+    run_status = "Failed" if event.level == "ERROR" else "Success"
 
     # 1. Upsert pipeline row scoped to this workspace
     now      = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -90,8 +120,8 @@ def ingest(event: LogEvent, db: Session = Depends(get_db)):
 
     db.flush()  # write PipelineRun so the query below sees it
 
-    # 3. Derive pipeline status from the MOST RECENT run (by created_at) for this workspace.
-    #    This prevents a delayed old-error event from flipping a recovered pipeline back to Failed.
+    # 3. Derive pipeline status from the MOST RECENT run for this workspace.
+    #    Prevents a delayed old-error event from flipping a recovered pipeline back to Failed.
     latest_run = (
         db.query(PipelineRun)
         .filter(
@@ -105,16 +135,29 @@ def ingest(event: LogEvent, db: Session = Depends(get_db)):
 
     db.commit()
 
-    # 4. For errors, publish to queue — include workspace_id so worker can scope DB writes
+    # 4. For errors, scrub PII/secrets then publish to queue
     if event.level == "ERROR":
         redis_client.xadd(STREAM_NAME, {
             "workspace_id": workspace_id,
             "job_id":       event.job_id,
             "run_id":       event.run_id,
-            "message":      event.message,
+            "message":      scrub_text(event.message),
         })
 
     return {"status": "accepted", "run_id": event.run_id}
+
+
+# ── Route handlers ─────────────────────────────────────────────────────────────
+
+@app.post("/ingest", status_code=202)
+def ingest(
+    event: LogEvent,
+    db: Session = Depends(get_db),
+    api_key_workspace: Optional[str] = Depends(_get_workspace_from_api_key),
+):
+    # API key workspace overrides the payload field when a valid key is supplied
+    workspace_id = api_key_workspace or event.workspace_id
+    return _do_ingest(event, workspace_id, db)
 
 
 class GenericWebhookEvent(BaseModel):
@@ -125,20 +168,25 @@ class GenericWebhookEvent(BaseModel):
 
 
 @app.post("/webhook/generic", status_code=202)
-def webhook_generic(event: GenericWebhookEvent, db: Session = Depends(get_db)):
+def webhook_generic(
+    event: GenericWebhookEvent,
+    db: Session = Depends(get_db),
+    api_key_workspace: Optional[str] = Depends(_get_workspace_from_api_key),
+):
     """Simplified webhook — accepts {pipeline, level, message, timestamp}."""
-    ts = event.timestamp or datetime.now(timezone.utc).isoformat()
-    run_id = f"{event.pipeline}-{uuid.uuid4().hex[:8]}"
+    ts           = event.timestamp or datetime.now(timezone.utc).isoformat()
+    run_id       = f"{event.pipeline}-{uuid.uuid4().hex[:8]}"
+    workspace_id = api_key_workspace or "default"
     synthetic = LogEvent(
-        source="webhook",
-        workspace_id="default",
-        job_id=event.pipeline,
-        run_id=run_id,
-        level=event.level.upper(),
-        timestamp=ts,
-        message=event.message,
+        source       = "webhook",
+        workspace_id = workspace_id,
+        job_id       = event.pipeline,
+        run_id       = run_id,
+        level        = event.level.upper(),
+        timestamp    = ts,
+        message      = event.message,
     )
-    return ingest(synthetic, db)
+    return _do_ingest(synthetic, workspace_id, db)
 
 
 class AirflowWebhookEvent(BaseModel):
@@ -157,7 +205,11 @@ class AirflowWebhookEvent(BaseModel):
 
 
 @app.post("/webhook/airflow", status_code=202)
-def webhook_airflow(event: AirflowWebhookEvent, db: Session = Depends(get_db)):
+def webhook_airflow(
+    event: AirflowWebhookEvent,
+    db: Session = Depends(get_db),
+    api_key_workspace: Optional[str] = Depends(_get_workspace_from_api_key),
+):
     """
     Airflow on_failure_callback / on_success_callback webhook.
 
@@ -170,13 +222,14 @@ def webhook_airflow(event: AirflowWebhookEvent, db: Session = Depends(get_db)):
       execution_date→ timestamp
     """
     failed_states = {"failed", "upstream_failed", "up_for_retry"}
-    level    = "ERROR" if event.state.lower() in failed_states else "INFO"
-    ts       = event.execution_date or datetime.now(timezone.utc).isoformat()
-    message  = event.exception or f"DAG {event.dag_id} — task {event.task_id or 'N/A'} {event.state}"
+    level        = "ERROR" if event.state.lower() in failed_states else "INFO"
+    ts           = event.execution_date or datetime.now(timezone.utc).isoformat()
+    message      = event.exception or f"DAG {event.dag_id} — task {event.task_id or 'N/A'} {event.state}"
+    workspace_id = api_key_workspace or "default"
 
     synthetic = LogEvent(
         source       = "airflow",
-        workspace_id = "default",
+        workspace_id = workspace_id,
         job_id       = event.dag_id,
         run_id       = event.run_id,
         task_id      = event.task_id,
@@ -185,4 +238,4 @@ def webhook_airflow(event: AirflowWebhookEvent, db: Session = Depends(get_db)):
         message      = message,
         raw_log_uri  = event.log_url,
     )
-    return ingest(synthetic, db)
+    return _do_ingest(synthetic, workspace_id, db)

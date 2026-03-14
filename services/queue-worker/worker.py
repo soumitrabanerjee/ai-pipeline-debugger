@@ -7,10 +7,12 @@ Flow:
       ▼
   worker.process_event()
       │
+      ├─ 0. scrub PII / secrets
       ├─ 1. parse error structure (log-processing-layer)
       ├─ 2. embed error message   (ai-engine /embed)
       ├─ 3. retrieve similar past incidents via pgvector  (ai-engine /retrieve)
       ├─ 4. analyse with Claude + RAG context  (ai-engine /analyze)
+      ├─ 4b. Root Cause Engine — build_hypotheses() + select_top()
       ├─ 5. upsert Error record + embedding to PostgreSQL
       └─ 6. send Slack alert
 """
@@ -24,12 +26,15 @@ from datetime import datetime, timezone
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.append(PROJECT_ROOT)
 sys.path.append(os.path.join(PROJECT_ROOT, 'services', 'log-processing-layer'))
+sys.path.append(os.path.join(PROJECT_ROOT, 'services', 'root-cause-engine'))
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from services.shared.models import Error
+from services.shared.scrubber import scrub
 from services.alerting.alerter import send_slack_alert
 from parser import extract_error
+from engine import build_hypotheses, select_top
 
 DATABASE_URL   = os.getenv("DATABASE_URL",   "postgresql://debugger:debugger@localhost:5433/pipeline_debugger")
 REDIS_URL      = os.getenv("REDIS_URL",      "redis://localhost:6379")
@@ -150,7 +155,18 @@ def process_event(event_id: str, fields: dict):
     """
     job_id       = fields.get("job_id",       "unknown")
     workspace_id = fields.get("workspace_id", "default")
-    message      = fields.get("message",      "")
+    raw_message  = fields.get("message",      "")
+
+    # ── 0. Scrub PII and secrets before any storage or AI call ────────────────
+    sr = scrub(raw_message)
+    message = sr.text
+    if sr.was_redacted:
+        print(f"[worker] Scrubbed PII/secrets — categories: {sr.redactions}")
+
+    # Cap stored log at 10 000 chars to prevent very large payloads from
+    # bloating the DB. Always the scrubbed text — never the pre-scrub original.
+    _RAW_LOG_MAX = 10_000
+    raw_log = message[:_RAW_LOG_MAX] if message else None
 
     print(f"[worker] Processing {event_id} — pipeline={job_id} workspace={workspace_id}")
 
@@ -180,6 +196,22 @@ def process_event(event_id: str, fields: dict):
     # ── 4. AI analysis (RAG-augmented when context available) ─────────────────
     ai_result = analyze_with_ai(message, pipeline_context, similar_incidents)
 
+    # ── 4b. Root Cause Engine — rank hypotheses, pick the best one ────────────
+    hypotheses = build_hypotheses(ai_result, parsed)
+    top        = select_top(hypotheses)
+    if top:
+        final_root_cause = top["hypothesis"]
+        final_fix        = top["fix"]
+        print(
+            f"[worker] RCE selected '{top['source']}' hypothesis "
+            f"(score={top['score']:.2f})"
+        )
+    else:
+        # No hypothesis available — surface the raw AI result as-is
+        final_root_cause = ai_result.get("root_cause",    "Pending")
+        final_fix        = ai_result.get("suggested_fix", "Pending")
+        print("[worker] RCE: no hypothesis candidates — using raw AI output")
+
     # ── 5. Upsert Error row, storing embedding for future retrieval ───────────
     db = SessionLocal()
     try:
@@ -192,9 +224,10 @@ def process_event(event_id: str, fields: dict):
         now = datetime.now(timezone.utc).isoformat()
 
         if existing:
-            existing.root_cause  = ai_result.get("root_cause",    "Pending")
-            existing.fix         = ai_result.get("suggested_fix",  "Pending")
+            existing.root_cause  = final_root_cause
+            existing.fix         = final_fix
             existing.detected_at = now
+            existing.raw_log     = raw_log
             if embedding:
                 existing.embedding = embedding
             print(f"[worker] Updated existing error '{error_type}' for pipeline '{job_id}'")
@@ -203,9 +236,10 @@ def process_event(event_id: str, fields: dict):
                 workspace_id  = workspace_id,
                 pipeline_name = job_id,
                 error_type    = error_type,
-                root_cause    = ai_result.get("root_cause",   "Pending"),
-                fix           = ai_result.get("suggested_fix", "Pending"),
+                root_cause    = final_root_cause,
+                fix           = final_fix,
                 detected_at   = now,
+                raw_log       = raw_log,
                 embedding     = embedding,
             ))
             print(f"[worker] Inserted new error '{error_type}' for pipeline '{job_id}'")
@@ -220,8 +254,8 @@ def process_event(event_id: str, fields: dict):
         pipeline_name = job_id,
         run_id        = run_id,
         error_type    = error_type,
-        root_cause    = ai_result.get("root_cause",   "Unknown"),
-        fix           = ai_result.get("suggested_fix", "Check logs manually."),
+        root_cause    = final_root_cause,
+        fix           = final_fix,
         severity      = parsed.severity or "ERROR",
     )
 

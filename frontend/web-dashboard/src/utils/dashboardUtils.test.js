@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatTimestamp, sortErrors, resolveTimezone, TIMEZONE_OPTIONS } from './dashboardUtils.js'
+import { formatTimestamp, sortErrors, sortRuns, truncateRunId, resolveTimezone, TIMEZONE_OPTIONS } from './dashboardUtils.js'
 
 // ── resolveTimezone ────────────────────────────────────────────────────────────
 
@@ -174,5 +174,101 @@ describe('sortErrors — by pipeline name (A→Z)', () => {
   test('returns empty array for empty input', () => {
     assert.deepEqual(sortErrors([], 'pipeline'), [])
     assert.deepEqual(sortErrors([], 'timestamp'), [])
+  })
+})
+
+// ── sortRuns ───────────────────────────────────────────────────────────────────
+
+const makeRun = (runId, createdAt, status = 'Success') => ({ runId, createdAt, status })
+
+describe('sortRuns — newest first', () => {
+  test('sorts newer runs before older ones', () => {
+    const runs = [
+      makeRun('run-a', '2026-03-10T08:00:00Z'),
+      makeRun('run-b', '2026-03-10T12:00:00Z'),
+      makeRun('run-c', '2026-03-10T06:00:00Z'),
+    ]
+    const sorted = sortRuns(runs)
+    assert.equal(sorted[0].runId, 'run-b')
+    assert.equal(sorted[1].runId, 'run-a')
+    assert.equal(sorted[2].runId, 'run-c')
+  })
+
+  test('pushes null createdAt to the end', () => {
+    const runs = [
+      makeRun('run-a', null),
+      makeRun('run-b', '2026-03-10T10:00:00Z'),
+    ]
+    const sorted = sortRuns(runs)
+    assert.equal(sorted[0].runId, 'run-b')
+    assert.equal(sorted[1].runId, 'run-a')
+  })
+
+  test('handles all-null createdAt without throwing', () => {
+    const sorted = sortRuns([makeRun('a', null), makeRun('b', null)])
+    assert.equal(sorted.length, 2)
+  })
+
+  test('returns empty array for empty input', () => {
+    assert.deepEqual(sortRuns([]), [])
+  })
+
+  test('does not mutate the original array', () => {
+    const runs = [
+      makeRun('run-a', '2026-03-10T08:00:00Z'),
+      makeRun('run-b', '2026-03-10T12:00:00Z'),
+    ]
+    const original = [...runs]
+    sortRuns(runs)
+    assert.deepEqual(runs, original)
+  })
+
+  test('single run is returned unchanged', () => {
+    const runs = [makeRun('only-run', '2026-03-10T10:00:00Z')]
+    assert.deepEqual(sortRuns(runs), runs)
+  })
+
+  test('Failed runs sort correctly alongside Success runs', () => {
+    const runs = [
+      makeRun('run-fail', '2026-03-10T09:00:00Z', 'Failed'),
+      makeRun('run-ok',   '2026-03-10T11:00:00Z', 'Success'),
+    ]
+    const sorted = sortRuns(runs)
+    assert.equal(sorted[0].runId, 'run-ok')
+    assert.equal(sorted[1].runId, 'run-fail')
+  })
+})
+
+// ── truncateRunId ─────────────────────────────────────────────────────────────
+
+describe('truncateRunId', () => {
+  test('short id is returned unchanged', () => {
+    assert.equal(truncateRunId('run-abc'), 'run-abc')
+  })
+
+  test('id exactly at maxLen is returned unchanged', () => {
+    const id = 'a'.repeat(20)
+    assert.equal(truncateRunId(id), id)
+  })
+
+  test('id longer than maxLen is truncated with ellipsis', () => {
+    const id = 'a'.repeat(30)
+    const result = truncateRunId(id)
+    assert.ok(result.endsWith('…'), `expected ellipsis, got: "${result}"`)
+    assert.equal(result.length, 21) // 20 chars + '…'
+  })
+
+  test('custom maxLen is respected', () => {
+    const result = truncateRunId('abcdefghij', 5)
+    assert.equal(result, 'abcde…')
+  })
+
+  test('empty string returns empty string', () => {
+    assert.equal(truncateRunId(''), '')
+  })
+
+  test('null/undefined returns empty string', () => {
+    assert.equal(truncateRunId(null), '')
+    assert.equal(truncateRunId(undefined), '')
   })
 })

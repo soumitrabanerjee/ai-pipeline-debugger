@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { filterDashboardItems } from './dashboardData'
 import CreatePipelineForm from './CreatePipelineForm'
-import { formatTimestamp, sortErrors, TIMEZONE_OPTIONS } from '../utils/dashboardUtils'
+import { formatTimestamp, sortErrors, sortRuns, truncateRunId, TIMEZONE_OPTIONS } from '../utils/dashboardUtils'
 export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme }) {
   const [query, setQuery]                       = useState('')
   const [data, setData]                         = useState({ pipelines: [], errors: [] })
@@ -10,6 +10,8 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme 
   const [showCreateForm, setShowCreateForm]     = useState(false)
   const [selectedPipeline, setSelectedPipeline] = useState(null)
   const [pipelineErrors, setPipelineErrors]     = useState([])
+  const [pipelineRuns, setPipelineRuns]         = useState([])
+  const [activeTab, setActiveTab]               = useState('errors') // 'errors' | 'runs'
   const [detailLoading, setDetailLoading]       = useState(false)
   const [errorSort, setErrorSort]               = useState('timestamp') // 'timestamp' | 'pipeline'
   const [timezone, setTimezone]                 = useState('local')
@@ -40,22 +42,31 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme 
 
   const handlePipelineClick = async (pipeline) => {
     setSelectedPipeline(pipeline)
+    setActiveTab('errors')
     setDetailLoading(true)
     const token = localStorage.getItem('apd_token')
+    const headers = token ? { 'x-session-token': token } : {}
     try {
-      const res = await fetch(`http://localhost:8001/pipelines/${encodeURIComponent(pipeline.name)}/errors`, {
-        headers: token ? { 'x-session-token': token } : {},
-      })
-      if (!res.ok) throw new Error()
-      setPipelineErrors(await res.json())
+      const [errRes, runRes] = await Promise.all([
+        fetch(`http://localhost:8001/pipelines/${encodeURIComponent(pipeline.name)}/errors`, { headers }),
+        fetch(`http://localhost:8001/pipelines/${encodeURIComponent(pipeline.name)}/runs`,   { headers }),
+      ])
+      setPipelineErrors(errRes.ok ? await errRes.json() : [])
+      setPipelineRuns(runRes.ok  ? await runRes.json()  : [])
     } catch {
       setPipelineErrors([])
+      setPipelineRuns([])
     } finally {
       setDetailLoading(false)
     }
   }
 
-  const closeModal = () => { setSelectedPipeline(null); setPipelineErrors([]) }
+  const closeModal = () => {
+    setSelectedPipeline(null)
+    setPipelineErrors([])
+    setPipelineRuns([])
+    setActiveTab('errors')
+  }
 
   const filteredItems = useMemo(() => {
     const base = filterDashboardItems(query, data.pipelines, data.errors)
@@ -93,6 +104,8 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme 
       {selectedPipeline && (
         <div className="db-modal-overlay" onClick={closeModal}>
           <div className="db-modal" onClick={e => e.stopPropagation()}>
+
+            {/* ── Modal header ── */}
             <div className="db-modal-header">
               <div>
                 <h2 className="db-modal-title">{selectedPipeline.name}</h2>
@@ -106,35 +119,92 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme 
               </div>
               <button className="db-modal-close" onClick={closeModal}>✕</button>
             </div>
-            <p className="db-modal-section-label">Error History</p>
+
+            {/* ── Tab bar ── */}
+            <div className="db-tab-bar">
+              <button
+                className={activeTab === 'errors' ? 'db-tab-btn db-tab-btn-active' : 'db-tab-btn'}
+                onClick={() => setActiveTab('errors')}
+              >
+                ⚠ Errors
+                {pipelineErrors.length > 0 && (
+                  <span className="db-tab-count">{pipelineErrors.length}</span>
+                )}
+              </button>
+              <button
+                className={activeTab === 'runs' ? 'db-tab-btn db-tab-btn-active' : 'db-tab-btn'}
+                onClick={() => setActiveTab('runs')}
+              >
+                ▶ Run History
+                {pipelineRuns.length > 0 && (
+                  <span className="db-tab-count">{pipelineRuns.length}</span>
+                )}
+              </button>
+            </div>
+
+            {/* ── Tab content ── */}
             <div className="db-modal-body">
               {detailLoading ? (
                 <div className="db-center-state"><div className="db-spinner" /></div>
-              ) : pipelineErrors.length === 0 ? (
-                <div className="db-center-state">
-                  <div className="db-center-icon">✓</div>
-                  <p className="db-center-text">No errors recorded for this pipeline.</p>
-                </div>
-              ) : (
-                pipelineErrors.map((item, i) => (
-                  <div key={i} className="db-error-card">
-                    <div className="db-analysis-card-header">
-                      <p className="db-error-type">⚠ {item.error}</p>
-                      {item.detectedAt && (
-                        <span className="db-timestamp" title={item.detectedAt}>
-                          🕐 {formatTimestamp(item.detectedAt, timezone)}
-                        </span>
-                      )}
-                    </div>
-                    <p className="db-error-cause">{item.rootCause}</p>
-                    <div className="db-fix-block">
-                      <span className="db-fix-icon">💡</span>
-                      <span>{item.fix}</span>
-                    </div>
+
+              ) : activeTab === 'errors' ? (
+                pipelineErrors.length === 0 ? (
+                  <div className="db-center-state">
+                    <div className="db-center-icon">✓</div>
+                    <p className="db-center-text">No errors recorded for this pipeline.</p>
                   </div>
-                ))
+                ) : (
+                  pipelineErrors.map((item, i) => (
+                    <div key={i} className="db-error-card">
+                      <div className="db-analysis-card-header">
+                        <p className="db-error-type">⚠ {item.error}</p>
+                        {item.detectedAt && (
+                          <span className="db-timestamp" title={item.detectedAt}>
+                            🕐 {formatTimestamp(item.detectedAt, timezone)}
+                          </span>
+                        )}
+                      </div>
+                      <p className="db-error-cause">{item.rootCause}</p>
+                      <div className="db-fix-block">
+                        <span className="db-fix-icon">💡</span>
+                        <span>{item.fix}</span>
+                      </div>
+                    </div>
+                  ))
+                )
+
+              ) : (
+                /* ── Run History tab ── */
+                sortRuns(pipelineRuns).length === 0 ? (
+                  <div className="db-center-state">
+                    <div className="db-center-icon">○</div>
+                    <p className="db-center-text">No runs recorded for this pipeline.</p>
+                  </div>
+                ) : (
+                  sortRuns(pipelineRuns).map((run, i) => (
+                    <div key={run.runId ?? i} className="db-run-card">
+                      <div className="db-run-row">
+                        <span className="db-run-id" title={run.runId}>
+                          {truncateRunId(run.runId)}
+                        </span>
+                        <div className="db-run-right">
+                          {run.createdAt && (
+                            <span className="db-timestamp" title={run.createdAt}>
+                              🕐 {formatTimestamp(run.createdAt, timezone)}
+                            </span>
+                          )}
+                          <span className={run.status === 'Failed' ? 'db-chip db-chip-failed' : 'db-chip db-chip-success'}>
+                            <span className="db-chip-dot" />
+                            {run.status}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )
               )}
             </div>
+
           </div>
         </div>
       )}

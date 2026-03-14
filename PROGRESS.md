@@ -48,12 +48,12 @@ AI Debugging Engine           ✅ BUILT
 (FastAPI :8002 → Claude claude-haiku-4-5 — dual-source RAG: past incidents + runbook sections)
           │
           ▼
-Root Cause Engine             ⚠️  STUB
-(rank_hypotheses() sorts by score — not wired to AI output)
+Root Cause Engine             ✅ BUILT
+(build_hypotheses() pools AI + rule candidates; select_top() picks highest score)
           │
           ▼
 API Layer                     ✅ BUILT
-(FastAPI :8001 — /dashboard, /pipelines/{n}/errors, /pipelines/{n}/runs — all auth-gated + workspace-scoped)
+(FastAPI :8001 — /dashboard, /pipelines/{n}/errors, /pipelines/{n}/runs — auth-gated + workspace-scoped + rate-limited via slowapi)
           │
      ┌────┴──────┐
      ▼            ▼
@@ -127,7 +127,7 @@ python3 -m pytest tests/ -v
 - [x] **Feature #3 — RAG for Internal Runbooks** — `runbook_ingester.py` chunks Markdown runbooks on `##`/`###` headers with paragraph overflow splitting and 50-char overlap; `RunbookChunk` model in `shared/models.py`; `POST /runbooks/ingest` in api-layer embeds each chunk via ai-engine and upserts to `runbook_chunks` table; `ai-engine /retrieve` does dual-source KNN: past error incidents + runbook chunks; worker passes both to Claude; `rag_pipeline.build_debug_prompt()` surfaces both sources with runbook citation instruction; runbook sections take priority over generic incident history
 - [x] **Real Airflow integration** — `debugger_etl_pipeline` DAG triggers `on_failure_callback` → webhook → AI analysis
 - [x] **PySpark integration** — customer_etl.py with ZeroDivisionError; log agent + webhook dual ingestion
-- [x] **160 passing tests**
+- [x] **280 passing tests** (Root Cause Engine +45, raw log storage +14, rate limiting +22)
 
 ---
 
@@ -139,27 +139,27 @@ python3 -m pytest tests/ -v
 | Log Collection Layer | ✅ Built | — |
 | Log Ingestion API | ✅ Built | — |
 | Message Queue | ✅ Built | — |
-| **Log Storage (raw logs)** | ❌ Missing | Raw log text not stored; only metadata in PostgreSQL |
+| **Log Storage (raw logs)** | ✅ Built | `raw_log TEXT` column on errors; scrubbed text stored (≤10 000 chars); nullable for legacy rows |
 | Log Processing Layer | ✅ Built | Feature #2: advanced_parser.py with full exception block assembly |
 | Runbook RAG Ingestion | ✅ Built | Feature #3: runbook_ingester.py → runbook_chunks → pgvector |
 | **RAG / Vector DB** | ✅ Built | Dual-source: past incidents + runbook sections; HNSW cosine KNN |
-| **Multi-Tenant Isolation** | ✅ Built | workspace_id on all tables; auth-gated API endpoints |
+| **Multi-Tenant Isolation** | ✅ Built | workspace_id on all tables; auth-gated API endpoints; API keys + PostgreSQL RLS |
 | AI Debugging Engine | ✅ Built | Dual-source RAG prompt: incidents + runbook citations |
-| **Root Cause Engine** | ⚠️ Stub | `rank_hypotheses()` never called; AI result goes straight to DB |
+| **Root Cause Engine** | ✅ Built | `build_hypotheses()` + `select_top()` called after AI analysis; 17-entry rule catalogue; rule wins when AI confidence < rule score |
 | API Layer | ✅ Built | — |
-| Web Dashboard | ✅ Built | Run history tab not shown in modal yet |
+| Web Dashboard | ✅ Built | Run history tab now live in pipeline modal |
 | Slack Alerts | ✅ Built | — |
 
 ---
 
 ## Next Steps (Priority Order)
 
-1. **Feature #1 — Data Privacy & Log Obfuscation** — PII scrubbing (emails, IPs, credit card patterns) and secret redaction before logs are stored or sent to Claude
-2. **Feature #4 — API Key lifecycle + PostgreSQL RLS** — per-workspace API keys for webhook endpoints; PostgreSQL Row-Level Security policies to enforce tenant isolation at DB level
-3. **Run History UI** — `GET /pipelines/{name}/runs` endpoint exists and is tested; needs to be surfaced in the pipeline detail modal
-4. **Root Cause Engine integration** — call `rank_hypotheses()` to score + rank AI hypotheses before saving to DB
-5. **Log Storage (raw)** — store raw log text in a `raw_logs` TEXT column on the Error record
-6. **Rate limiting** — `slowapi` on the API layer to prevent abuse
+1. ~~**Feature #1 — Data Privacy & Log Obfuscation**~~ ✅ **DONE** — `services/shared/scrubber.py`; 12 pattern categories; wired into ingestion API (before Redis publish) and queue worker (before parse/embed/AI/store); 52 passing tests
+2. ~~**Feature #4 — API Key lifecycle + PostgreSQL RLS**~~ ✅ **DONE** — `ApiKey` model in `shared/models.py`; `POST/GET/DELETE /api-keys` in api-layer (key hash stored, full key shown once, soft-delete revocation); `x-api-key` header validation on `/ingest`, `/webhook/generic`, `/webhook/airflow`; RLS policies (`ws_isolation`) + `ENABLE ROW LEVEL SECURITY` on pipelines/pipeline_runs/errors/runbook_chunks; `_set_rls_workspace()` called per authenticated request; 33 passing tests
+3. ~~**Run History UI**~~ ✅ **DONE** — Pipeline detail modal now has two tabs: "Errors" + "Run History"; fetches `/pipelines/{name}/runs` in parallel with errors on modal open; runs sorted newest-first via `sortRuns()`; run ID truncated via `truncateRunId()`; status badge + formatted timestamp per row; tab count badges; `sortRuns` + `truncateRunId` added to `dashboardUtils.js`; 16 new JS tests (45 total passing)
+4. ~~**Root Cause Engine integration**~~ ✅ **DONE** — `build_hypotheses()` pools AI + rule hypotheses; `select_top()` picks highest score; 17-entry `_RULE_CATALOGUE` (OOM, EXECUTOR_FAILURE, SCHEMA_MISMATCH, NETWORK, PERMISSIONS, etc.); rule scores capped at 0.88 so high-confidence AI (≥0.90) always wins; fallback to raw AI result when no candidates; fixed pre-existing `_AIRFLOW_CTX_RE` bug in advanced_parser; 45 new tests (72 total in engine + worker + parser tests)
+5. ~~**Log Storage (raw)**~~ ✅ **DONE** — `raw_log TEXT` added to `Error` model + `ALTER TABLE errors ADD COLUMN IF NOT EXISTS raw_log TEXT` migration; scrubbed `message` stored on every insert/update (capped at 10 000 chars); `rawLog` exposed in `ErrorItem` schema and all `/dashboard` + `/pipelines/*/errors` responses; 14 new tests
+6. ~~**Rate limiting**~~ ✅ **DONE** — `slowapi` added to all API layer endpoints; tiered limits per endpoint class; `_apply_tiny_limits()` pattern for deterministic 429 tests; 22 new tests
 7. **Teams / Email / PagerDuty alerts** — expand beyond Slack
 
 ---
@@ -241,3 +241,36 @@ CREATE TABLE runbook_chunks (
 CREATE INDEX ON runbook_chunks USING hnsw (embedding vector_cosine_ops)
     WITH (m = 16, ef_construction = 64);
 ```
+
+---
+
+### Feature #4 — Root Cause Engine wired to AI output (March 14, 2026)
+
+**Files changed:**
+- `services/root-cause-engine/engine.py` *(expanded from 2-line stub)*
+- `services/queue-worker/worker.py` *(step 4b added)*
+- `services/queue-worker/Dockerfile` *(root-cause-engine COPY added)*
+- `services/log-processing-layer/advanced_parser.py` *(bug fix: `_AIRFLOW_CTX_RE` class attribute referenced as module-level name)*
+- `tests/test_root_cause_engine.py` *(rewritten — 7 → 45 tests)*
+- `tests/test_worker.py` *(updated for RCE wiring + accurate parser assertions)*
+- `tests/test_parser.py` *(rewritten for advanced_parser actual behavior)*
+
+**What it does:**
+
+Previously, Claude's raw `root_cause` and `suggested_fix` were saved to the DB verbatim. The Root Cause Engine now sits between AI analysis (step 4) and DB write (step 5):
+
+1. **`build_hypotheses(ai_result, parsed_error)`** — assembles a pool of candidates:
+   - *AI hypothesis*: Claude's root_cause + suggested_fix, scored by `confidence_score`. Excluded when the AI service was unavailable (sentinel phrases like "Analysis Failed" or "unavailable").
+   - *Rule hypothesis*: deterministic lookup from `_RULE_CATALOGUE` keyed on the parsed exception category (OOM, EXECUTOR_FAILURE, SCHEMA_MISMATCH, etc.).
+
+2. **`_RULE_CATALOGUE`** — 17 entries covering all exception categories from the advanced parser: OOM, BROADCAST_OOM, EXECUTOR_FAILURE, DATA_TYPE, MISSING_KEY, MISSING_FILE, SCHEMA_MISMATCH, NETWORK, IO_ERROR, TIMEOUT, NULL_REF, PERMISSIONS, CLASSPATH, DIVIDE_BY_ZERO, AIRFLOW_INTERNAL, ENCODING, ASSERTION. Rule scores are capped at 0.88 so a high-confidence Claude result (≥0.90) always wins.
+
+3. **`select_top(candidates)`** — calls `rank_hypotheses()` (sort by score desc) and returns the winner. Returns `None` when no candidates are available.
+
+4. **Worker step 4b**: After AI analysis, calls `build_hypotheses()` + `select_top()`. Uses `top["hypothesis"]` / `top["fix"]` for DB write and Slack alert. Falls back to raw AI result when `select_top()` returns None (e.g., AI unavailable + no matching rule).
+
+**Scoring logic summary:**
+- Claude confidence ≥ 0.90: AI wins over any rule (rules max at 0.88)
+- Claude confidence 0.50–0.88: AI vs rule depends on category (rule wins for OOM, SCHEMA_MISMATCH, etc.)
+- Claude unavailable: rule hypothesis surfaces if exception category is catalogued; raw fallback message used otherwise
+- Unknown exception category: only AI hypothesis (or raw fallback if AI unavailable)

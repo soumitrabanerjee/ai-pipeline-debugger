@@ -124,6 +124,36 @@ class RunbookChunk(Base):
     embedding     = _EMBED_COL()
 
 
+class ApiKey(Base):
+    """
+    Per-workspace API key for authenticating webhook and ingestion requests.
+
+    Key format: dpd_<64 random hex chars>
+    Only the SHA-256 hash is stored — the full key is shown exactly once at
+    creation time and cannot be recovered afterwards.
+
+    Rules:
+      - key_hash is globally unique (indexed for fast lookup on every request).
+      - key_prefix stores the first 12 chars (e.g. "dpd_ab12cd34")
+        so users can identify which key is which without exposing the secret.
+      - is_active = False means the key is revoked (soft delete).
+      - (workspace_id, name) is unique so users can't create two keys with
+        the same friendly name in the same workspace.
+    """
+    __tablename__ = "api_keys"
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "name", name="uq_api_keys_workspace_name"),
+    )
+
+    id           = Column(Integer, primary_key=True, index=True)
+    workspace_id = Column(String,  nullable=False, index=True)
+    name         = Column(String,  nullable=False)
+    key_prefix   = Column(String,  nullable=False)   # first 12 chars for display
+    key_hash     = Column(String,  nullable=False, unique=True, index=True)  # SHA-256
+    created_at   = Column(String,  nullable=False)
+    is_active    = Column(Boolean, nullable=False, default=True, server_default="true")
+
+
 class Error(Base):
     """
     Stores the AI-analysed root cause for a pipeline error, plus its embedding
@@ -150,4 +180,5 @@ class Error(Base):
     root_cause    = Column(String,  nullable=True)
     fix           = Column(String,  nullable=True)
     detected_at   = Column(String,  nullable=True)   # ISO-8601; newest failure wins
+    raw_log       = Column(String,  nullable=True)   # scrubbed log text (≤10 000 chars)
     embedding     = _EMBED_COL()                      # vector(384) for pgvector KNN search

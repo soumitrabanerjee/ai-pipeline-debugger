@@ -74,3 +74,32 @@ export function sortErrors(errors, sortKey) {
     return b.detectedAt.localeCompare(a.detectedAt)
   })
 }
+
+/**
+ * Sort pipeline run items newest-first by createdAt.
+ * Runs with no createdAt are pushed to the end.
+ *
+ * @param {Array} runs  - Array of { runId, status, createdAt }
+ * @returns {Array}     - New sorted array (original is not mutated)
+ */
+export function sortRuns(runs) {
+  return [...runs].sort((a, b) => {
+    if (!a.createdAt && !b.createdAt) return 0
+    if (!a.createdAt) return 1
+    if (!b.createdAt) return -1
+    return b.createdAt.localeCompare(a.createdAt)
+  })
+}
+
+/**
+ * Truncate a run ID for compact display.
+ * Shows the first `maxLen` characters followed by '…' when longer.
+ *
+ * @param {string} runId
+ * @param {number} maxLen  - default 20
+ * @returns {string}
+ */
+export function truncateRunId(runId, maxLen = 20) {
+  if (!runId) return ''
+  return runId.length > maxLen ? `${runId.slice(0, maxLen)}…` : runId
+}

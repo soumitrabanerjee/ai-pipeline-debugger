@@ -5,6 +5,7 @@ WORKDIR /app
 COPY services/shared ./services/shared
 COPY services/alerting ./services/alerting
 COPY services/log-processing-layer ./services/log-processing-layer
+COPY services/root-cause-engine ./services/root-cause-engine
 COPY services/queue-worker ./services/queue-worker
 
 RUN pip install --no-cache-dir \

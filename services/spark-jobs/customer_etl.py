@@ -1,5 +1,5 @@
 """
-Customer LTV ETL — PySpark job
+is Customer LTV ETL — PySpark job
 
 Pipeline stages:
   1. Extract  — build synthetic customer + transaction records in-memory

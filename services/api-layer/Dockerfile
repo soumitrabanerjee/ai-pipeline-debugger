@@ -6,7 +6,7 @@ COPY services/shared ./services/shared
 COPY services/api-layer ./services/api-layer
 COPY services/log-processing-layer ./services/log-processing-layer
 
-RUN pip install --no-cache-dir fastapi uvicorn sqlalchemy psycopg2-binary pgvector requests
+RUN pip install --no-cache-dir fastapi uvicorn sqlalchemy psycopg2-binary pgvector requests slowapi
 
 WORKDIR /app/services/api-layer
 
