@@ -19,19 +19,24 @@ function snippets(jobId) {
     airflow: `# airflow/dags/${id}_dag.py
 import requests
 from airflow import DAG
-from airflow.operators.python import PythonOperator
 from datetime import datetime
 
-PIPELEX_URL = "${WEBHOOK_BASE}/airflow"
+PIPLEX_URL    = "${WEBHOOK_BASE}/airflow"
+PIPLEX_API_KEY = "YOUR_API_KEY"   # from Dashboard → API Keys
 
 def _on_failure(context):
     """Send failure event to PiPlex for AI root-cause analysis."""
-    requests.post(PIPELEX_URL, json={
-        "dag_id":    context["dag"].dag_id,
-        "run_id":    context["run_id"],
-        "task_id":   context["task_instance"].task_id,
-        "exception": str(context.get("exception", "Unknown error")),
-    }, timeout=5)
+    requests.post(
+        PIPLEX_URL,
+        headers={"x-api-key": PIPLEX_API_KEY},
+        json={
+            "dag_id":    context["dag"].dag_id,
+            "run_id":    context["run_id"],
+            "task_id":   context["task_instance"].task_id,
+            "exception": str(context.get("exception", "Unknown error")),
+        },
+        timeout=5,
+    )
 
 with DAG(
     dag_id="${id}",
@@ -47,19 +52,19 @@ with DAG(
 
 # Terminal 1 — start the agent; it watches for ERROR lines in real time
 python3 services/log-collection-layer/agent.py \\
-  --watch-dir /tmp/spark-logs \\
-  --job-id    ${id} \\
-  --ingest-url ${INGEST_BASE}
+  --watch-dir  /tmp/spark-logs \\
+  --job-id     ${id} \\
+  --ingest-url ${INGEST_BASE} \\
+  --api-key    YOUR_API_KEY
 
 # Terminal 2 — run your PySpark job and tee stderr to the watched dir
 spark-submit your_job.py 2>&1 | tee /tmp/spark-logs/${id}.log
-# or for a plain PySpark script:
-python3 your_spark_job.py 2>&1 | tee /tmp/spark-logs/${id}.log
 
 
 # ── Option B: Generic webhook (one-liner, no agent needed) ────────
 
 curl -X POST ${WEBHOOK_BASE}/generic \\
+  -H "x-api-key: YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
     "pipeline": "${id}",
@@ -67,10 +72,11 @@ curl -X POST ${WEBHOOK_BASE}/generic \\
     "message":  "PythonException: ValueError: could not convert string to float"
   }'`,
 
-    generic: `# Works with any system that can HTTP POST — no SDK required.
-# "timestamp" is optional; the server fills it in automatically.
+    generic: `# Works with any tool that can HTTP POST — no SDK required.
 
+# curl
 curl -X POST ${WEBHOOK_BASE}/generic \\
+  -H "x-api-key: YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
     "pipeline": "${id}",
@@ -78,30 +84,38 @@ curl -X POST ${WEBHOOK_BASE}/generic \\
     "message":  "Your error message here"
   }'
 
-# Python example
+# Python
 import requests
-requests.post("${WEBHOOK_BASE}/generic", json={
-    "pipeline": "${id}",
-    "level":    "ERROR",
-    "message":  "Your error message here",
-    # "run_id": "optional-run-id",
-    # "timestamp": "2026-03-14T10:00:00Z",  # optional
-}, timeout=5)`,
+requests.post(
+    "${WEBHOOK_BASE}/generic",
+    headers={"x-api-key": "YOUR_API_KEY"},
+    json={
+        "pipeline": "${id}",
+        "level":    "ERROR",
+        "message":  "Your error message here",
+    },
+    timeout=5,
+)`,
 
     prefect: `# prefect_flow.py
 import requests
-from prefect import flow, task
-from prefect.states import Failed
+from prefect import flow
 
-PIPELEX_URL = "${WEBHOOK_BASE}/generic"
+PIPLEX_URL     = "${WEBHOOK_BASE}/generic"
+PIPLEX_API_KEY = "YOUR_API_KEY"   # from Dashboard → API Keys
 
 def _notify_failure(flow_name: str, run_id: str, error: str):
-    requests.post(PIPELEX_URL, json={
-        "pipeline": flow_name,
-        "run_id":   run_id,
-        "level":    "ERROR",
-        "message":  error,
-    }, timeout=5)
+    requests.post(
+        PIPLEX_URL,
+        headers={"x-api-key": PIPLEX_API_KEY},
+        json={
+            "pipeline": flow_name,
+            "run_id":   run_id,
+            "level":    "ERROR",
+            "message":  error,
+        },
+        timeout=5,
+    )
 
 @flow(name="${id}")
 def my_flow():
