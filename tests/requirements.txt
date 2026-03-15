@@ -6,6 +6,7 @@ sqlalchemy
 pydantic
 requests
 redis
+watchdog
 slowapi
 limits
 anthropic
