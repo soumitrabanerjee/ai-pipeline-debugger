@@ -50,7 +50,19 @@ def override_get_db():
         db.close()
 
 
+class _FakeUser:
+    id = "default"
+    email = "test@test.com"
+    name = "Test"
+    paid = True
+    plan = "pro"
+    session_token = "test-token"
+    created_at = "2026-01-01"
+    is_admin = False
+    password_hash = "x"
+
 app.dependency_overrides[get_db] = override_get_db
+app.dependency_overrides[api_main.get_current_user] = lambda: _FakeUser()
 client = TestClient(app)
 
 

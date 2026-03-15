@@ -50,6 +50,8 @@ def override_get_db():
 
 
 app.dependency_overrides[get_db] = override_get_db
+# Bypass API key auth in tests — always return the test workspace
+app.dependency_overrides[ingestion_main._get_workspace_from_api_key] = lambda: "data-team"
 client = TestClient(app)
 
 SAMPLE_ERROR_EVENT = {

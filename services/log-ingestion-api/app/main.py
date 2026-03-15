@@ -128,7 +128,7 @@ def _do_ingest(event: LogEvent, workspace_id: str, db: Session) -> dict:
             PipelineRun.workspace_id  == workspace_id,
             PipelineRun.pipeline_name == event.job_id,
         )
-        .order_by(PipelineRun.created_at.desc())
+        .order_by(PipelineRun.created_at.desc(), PipelineRun.id.desc())
         .first()
     )
     pipeline.status = latest_run.status if latest_run else run_status

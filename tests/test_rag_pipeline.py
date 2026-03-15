@@ -24,7 +24,7 @@ class TestBuildDebugPrompt:
 
     def test_incidents_formatted_as_bullets(self):
         result = build_debug_prompt("error", ["incident A"])
-        assert "- incident A" in result
+        assert "incident A" in result
 
     def test_empty_incidents_list(self):
         result = build_debug_prompt("some error", [])

@@ -23,6 +23,7 @@ from agent import LogDirectoryHandler, send_to_ingest, scan_existing, _FileTaile
 from webhook_collector import app as webhook_app
 
 webhook_client = TestClient(webhook_app)
+_API_KEY_HDR = {"x-api-key": "dpd_test_key"}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -304,12 +305,12 @@ class TestAirflowWebhook:
 
     def test_returns_202(self):
         with patch("webhook_collector._forward"):
-            resp = webhook_client.post("/webhook/airflow", json=self._BODY)
+            resp = webhook_client.post("/webhook/airflow", json=self._BODY, headers=_API_KEY_HDR)
         assert resp.status_code == 202
 
     def test_returns_run_id(self):
         with patch("webhook_collector._forward"):
-            resp = webhook_client.post("/webhook/airflow", json=self._BODY)
+            resp = webhook_client.post("/webhook/airflow", json=self._BODY, headers=_API_KEY_HDR)
         assert resp.json()["run_id"] == self._BODY["run_id"]
 
     def test_missing_required_fields_returns_422(self):
@@ -318,29 +319,26 @@ class TestAirflowWebhook:
 
     def test_forwarded_payload_has_correct_source(self):
         captured = {}
-        def fake_forward(payload):
+        def fake_forward(payload, api_key):
             captured.update(payload)
-        with patch("webhook_collector._forward",
-                   side_effect=fake_forward):
-            webhook_client.post("/webhook/airflow", json=self._BODY)
+        with patch("webhook_collector._forward", side_effect=fake_forward):
+            webhook_client.post("/webhook/airflow", json=self._BODY, headers=_API_KEY_HDR)
         assert captured["source"] == "airflow"
 
     def test_forwarded_payload_maps_dag_id_to_job_id(self):
         captured = {}
-        def fake_forward(payload):
+        def fake_forward(payload, api_key):
             captured.update(payload)
-        with patch("webhook_collector._forward",
-                   side_effect=fake_forward):
-            webhook_client.post("/webhook/airflow", json=self._BODY)
+        with patch("webhook_collector._forward", side_effect=fake_forward):
+            webhook_client.post("/webhook/airflow", json=self._BODY, headers=_API_KEY_HDR)
         assert captured["job_id"] == "customer_etl"
 
     def test_forwarded_payload_level_is_error(self):
         captured = {}
-        def fake_forward(payload):
+        def fake_forward(payload, api_key):
             captured.update(payload)
-        with patch("webhook_collector._forward",
-                   side_effect=fake_forward):
-            webhook_client.post("/webhook/airflow", json=self._BODY)
+        with patch("webhook_collector._forward", side_effect=fake_forward):
+            webhook_client.post("/webhook/airflow", json=self._BODY, headers=_API_KEY_HDR)
         assert captured["level"] == "ERROR"
 
 
@@ -354,38 +352,36 @@ class TestGenericWebhook:
 
     def test_returns_202(self):
         with patch("webhook_collector._forward"):
-            resp = webhook_client.post("/webhook/generic", json=self._BODY)
+            resp = webhook_client.post("/webhook/generic", json=self._BODY, headers=_API_KEY_HDR)
         assert resp.status_code == 202
 
     def test_generates_run_id_when_not_provided(self):
         with patch("webhook_collector._forward"):
-            resp = webhook_client.post("/webhook/generic", json=self._BODY)
+            resp = webhook_client.post("/webhook/generic", json=self._BODY, headers=_API_KEY_HDR)
         run_id = resp.json()["run_id"]
         uuid.UUID(run_id)  # raises if not a valid UUID
 
     def test_uses_provided_run_id(self):
         body = {**self._BODY, "run_id": "my-custom-run-id"}
         with patch("webhook_collector._forward"):
-            resp = webhook_client.post("/webhook/generic", json=body)
+            resp = webhook_client.post("/webhook/generic", json=body, headers=_API_KEY_HDR)
         assert resp.json()["run_id"] == "my-custom-run-id"
 
     def test_forwarded_payload_has_pipeline_as_job_id(self):
         captured = {}
-        def fake_forward(payload):
+        def fake_forward(payload, api_key):
             captured.update(payload)
-        with patch("webhook_collector._forward",
-                   side_effect=fake_forward):
-            webhook_client.post("/webhook/generic", json=self._BODY)
+        with patch("webhook_collector._forward", side_effect=fake_forward):
+            webhook_client.post("/webhook/generic", json=self._BODY, headers=_API_KEY_HDR)
         assert captured["job_id"] == "billing-etl"
 
     def test_level_upcased(self):
         body = {**self._BODY, "level": "error"}
         captured = {}
-        def fake_forward(payload):
+        def fake_forward(payload, api_key):
             captured.update(payload)
-        with patch("webhook_collector._forward",
-                   side_effect=fake_forward):
-            webhook_client.post("/webhook/generic", json=body)
+        with patch("webhook_collector._forward", side_effect=fake_forward):
+            webhook_client.post("/webhook/generic", json=body, headers=_API_KEY_HDR)
         assert captured["level"] == "ERROR"
 
     def test_missing_pipeline_returns_422(self):

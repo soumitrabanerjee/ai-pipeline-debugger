@@ -5,3 +5,10 @@ fastapi
 sqlalchemy
 pydantic
 requests
+redis
+slowapi
+limits
+anthropic
+psycopg2-binary
+pgvector
+sentence-transformers

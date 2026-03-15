@@ -89,7 +89,7 @@ ingest_client = TestClient(ingest_app)
 
 @pytest.fixture(autouse=True)
 def clean_db():
-    """Wipe all rows before each test."""
+    """Wipe all rows and reset rate limiter before each test."""
     db = TestingSession()
     db.query(ApiKey).delete()
     db.query(Error).delete()
@@ -97,6 +97,11 @@ def clean_db():
     db.query(User).delete()
     db.commit()
     db.close()
+    # Reset slowapi in-memory rate limit counters so each test starts clean
+    try:
+        api_layer_main.limiter._storage.reset()
+    except Exception:
+        pass
 
 
 def _register(email: str = "user@example.com", password: str = "pass123") -> dict:
@@ -232,11 +237,13 @@ class TestListApiKeys:
         resp = api_client.get("/api-keys")
         assert resp.status_code == 401
 
-    def test_empty_list_for_new_user(self):
+    def test_default_key_for_new_user(self):
         auth = _register()
         resp = api_client.get("/api-keys", headers=_auth_headers(auth["token"]))
         assert resp.status_code == 200
-        assert resp.json() == []
+        keys = resp.json()
+        assert len(keys) == 1
+        assert keys[0]["name"] == "default"
 
     def test_lists_created_keys(self):
         auth = _register()
@@ -252,7 +259,9 @@ class TestListApiKeys:
         auth = _register()
         created = _create_key(auth["token"])
         resp = api_client.get("/api-keys", headers=_auth_headers(auth["token"]))
-        listed = resp.json()[0]
+        # Find the specific key we just created (list also contains auto-created "default" key)
+        keys = resp.json()
+        listed = next(k for k in keys if k["id"] == created["id"])
         assert "key" not in listed                        # full key field absent
         assert listed["key_prefix"] == created["key_prefix"]
         assert len(listed["key_prefix"]) == 12
@@ -327,12 +336,12 @@ class TestRevokeApiKey:
 
 class TestIngestionApiKeyAuth:
 
-    def test_webhook_without_api_key_uses_default_workspace(self):
+    def test_webhook_without_api_key_returns_401(self):
         resp = ingest_client.post(
             "/webhook/generic",
             json={"pipeline": "test-pipe", "level": "INFO", "message": "ok"},
         )
-        assert resp.status_code == 202
+        assert resp.status_code == 401
 
     def test_webhook_with_invalid_api_key_returns_401(self):
         resp = ingest_client.post(
