@@ -39,8 +39,9 @@ export default function App() {
       .then(u => {
         setUser(u)
         if (!u.paid) { setPage('payment'); return }
-        // Restore last page if it's a valid authed page, otherwise default to home
-        setPage(AUTHED_PAGES.has(savedPage) ? savedPage : 'home')
+        // Restore last page — but only restore 'admin' if user is actually an admin
+        const targetPage = AUTHED_PAGES.has(savedPage) ? savedPage : 'home'
+        setPage(targetPage === 'admin' && !u.is_admin ? 'home' : targetPage)
       })
       .catch(() => { localStorage.removeItem('apd_token'); localStorage.removeItem('apd_page'); setPage('landing') })
   }, [])
@@ -74,5 +75,7 @@ export default function App() {
   if (page === 'login')     return <LoginPage    onLogin={handleLogin} onBack={() => navigate('landing')} />
   if (page === 'payment')   return <PaymentPage  user={user} onPaymentComplete={handlePaymentComplete} onSignOut={handleSignOut} />
   if (page === 'dashboard') return <Dashboard    onBack={() => navigate('home')} user={user} onSignOut={handleSignOut} theme={theme} toggleTheme={toggleTheme} />
-  if (page === 'admin')     return <AdminDashboard user={user} onSignOut={handleSignOut} theme={theme} toggleTheme={toggleTheme} onBack={() => navigate('home')} />
+  if (page === 'admin')     return user?.is_admin
+    ? <AdminDashboard user={user} onSignOut={handleSignOut} theme={theme} toggleTheme={toggleTheme} onBack={() => navigate('home')} />
+    : <HomePage user={user} onOpenDashboard={() => navigate('dashboard')} onOpenAdmin={() => navigate('admin')} onSignOut={handleSignOut} theme={theme} toggleTheme={toggleTheme} />
 }
