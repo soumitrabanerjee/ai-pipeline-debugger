@@ -128,10 +128,12 @@ class UserOut(BaseModel):
     name: str | None
     paid: bool
     plan: str | None
+    is_admin: bool = False
 
 class AuthResponse(BaseModel):
     token: str
     user: UserOut
+    api_key: Optional[str] = None
 
 # ── Lifespan ───────────────────────────────────────────────────────────────────
 
@@ -289,6 +291,15 @@ async def lifespan(app: FastAPI):
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_keys_workspace ON api_keys(workspace_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_keys_hash ON api_keys(key_hash)"))
 
+        # ── is_admin column on users ──────────────────────────────────────────
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false"))
+        admin_emails_raw = os.getenv("ADMIN_EMAILS", "")
+        if admin_emails_raw.strip():
+            for ae in admin_emails_raw.split(","):
+                ae = ae.strip()
+                if ae:
+                    conn.execute(text("UPDATE users SET is_admin = true WHERE email = :e"), {"e": ae})
+
         # ── PostgreSQL Row-Level Security (defense-in-depth) ──────────────────
         # Policies enforce workspace_id isolation at the DB layer, on top of
         # the existing workspace_id filters in application queries.
@@ -357,11 +368,25 @@ def get_current_user(
     return user
 
 def _user_out(user: User) -> dict:
-    return {"email": user.email, "name": user.name, "paid": user.paid, "plan": user.plan}
+    return {"email": user.email, "name": user.name, "paid": user.paid, "plan": user.plan, "is_admin": getattr(user, 'is_admin', False)}
 
 def _workspace(user: User) -> str:
     """Each user is their own tenant. workspace_id = str(user.id)."""
     return str(user.id)
+
+def _auto_create_api_key(user: User, db: Session) -> str:
+    """Create a default API key for a newly registered user. Returns the raw key (shown once)."""
+    full_key, prefix, key_hash = generate_api_key()
+    db.add(ApiKey(
+        workspace_id = str(user.id),
+        name         = "default",
+        key_prefix   = prefix,
+        key_hash     = key_hash,
+        created_at   = datetime.now(timezone.utc).isoformat(),
+        is_active    = True,
+    ))
+    db.commit()
+    return full_key
 
 # ── Auth endpoints ─────────────────────────────────────────────────────────────
 
@@ -382,7 +407,8 @@ def register(request: Request, req: RegisterRequest, db: Session = Depends(get_d
     db.add(user)
     db.commit()
     db.refresh(user)
-    return {"token": token, "user": _user_out(user)}
+    raw_key = _auto_create_api_key(user, db)
+    return {"token": token, "user": _user_out(user), "api_key": raw_key}
 
 @app.post("/auth/login", response_model=AuthResponse)
 @limiter.limit("10/minute")
@@ -399,6 +425,47 @@ def login(request: Request, req: LoginRequest, db: Session = Depends(get_db)):
 @limiter.limit("60/minute")
 def me(request: Request, current_user: User = Depends(get_current_user)):
     return _user_out(current_user)
+
+class GoogleAuthRequest(BaseModel):
+    access_token: str
+
+@app.post("/auth/google", response_model=AuthResponse)
+@limiter.limit("20/minute")
+def google_auth(request: Request, req: GoogleAuthRequest, db: Session = Depends(get_db)):
+    import requests as req_lib
+    resp = req_lib.get(
+        "https://www.googleapis.com/oauth2/v1/userinfo",
+        params={"access_token": req.access_token},
+        timeout=5,
+    )
+    if not resp.ok:
+        raise HTTPException(status_code=401, detail="Invalid Google access token")
+    info  = resp.json()
+    email = info.get("email")
+    name  = info.get("name") or email.split("@")[0]
+    if not email:
+        raise HTTPException(status_code=401, detail="Google account has no email")
+
+    user = db.query(User).filter(User.email == email).first()
+    if user:
+        user.session_token = secrets.token_urlsafe(32)
+    else:
+        user = User(
+            email         = email,
+            name          = name,
+            password_hash = "",   # Google users have no password
+            paid          = False,
+            session_token = secrets.token_urlsafe(32),
+            created_at    = datetime.now(timezone.utc).isoformat(),
+        )
+        db.add(user)
+    db.commit()
+    db.refresh(user)
+    raw_key = None
+    existing_key = db.query(ApiKey).filter(ApiKey.workspace_id == str(user.id)).first()
+    if not existing_key:
+        raw_key = _auto_create_api_key(user, db)
+    return {"token": user.session_token, "user": _user_out(user), "api_key": raw_key}
 
 @app.post("/auth/payment", response_model=UserOut)
 @limiter.limit("10/minute")
@@ -717,6 +784,59 @@ def list_runbooks(
         .all()
     )
     return [{"source_file": r.source_file, "chunks": r.chunks} for r in rows]
+
+
+# ── Admin endpoints ────────────────────────────────────────────────────────────
+
+def get_admin_user(current_user: User = Depends(get_current_user)) -> User:
+    if not getattr(current_user, 'is_admin', False):
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return current_user
+
+@app.get("/admin/stats")
+@limiter.limit("60/minute")
+def admin_stats(request: Request, db: Session = Depends(get_db), _: User = Depends(get_admin_user)):
+    from sqlalchemy import func
+    total_users  = db.query(func.count(User.id)).scalar()
+    paid_users   = db.query(func.count(User.id)).filter(User.paid == True).scalar()
+    by_plan      = {row[0]: row[1] for row in db.query(User.plan, func.count(User.id)).group_by(User.plan).all()}
+    total_pipelines = db.query(func.count(Pipeline.id)).scalar()
+    total_errors    = db.query(func.count(Error.id)).scalar()
+    total_runs      = db.query(func.count(PipelineRun.id)).scalar()
+    recent_users = db.query(User).order_by(User.created_at.desc()).limit(10).all()
+    return {
+        "total_users":    total_users,
+        "paid_users":     paid_users,
+        "free_users":     total_users - paid_users,
+        "by_plan":        by_plan,
+        "total_pipelines": total_pipelines,
+        "total_errors":   total_errors,   # approximates Claude API calls
+        "total_runs":     total_runs,
+        "recent_signups": [_user_out(u) for u in recent_users],
+    }
+
+@app.get("/admin/users")
+@limiter.limit("60/minute")
+def admin_users(request: Request, db: Session = Depends(get_db), _: User = Depends(get_admin_user)):
+    from sqlalchemy import func
+    users = db.query(User).order_by(User.created_at.desc()).all()
+    result = []
+    for u in users:
+        ws = str(u.id)
+        pipelines = db.query(func.count(Pipeline.id)).filter(Pipeline.workspace_id == ws).scalar()
+        errors    = db.query(func.count(Error.id)).filter(Error.workspace_id == ws).scalar()
+        runs      = db.query(func.count(PipelineRun.id)).filter(PipelineRun.workspace_id == ws).scalar()
+        api_key   = db.query(ApiKey).filter(ApiKey.workspace_id == ws, ApiKey.is_active == True).first()
+        result.append({
+            **_user_out(u),
+            "id":             u.id,
+            "created_at":     u.created_at,
+            "pipeline_count": pipelines,
+            "error_count":    errors,
+            "run_count":      runs,
+            "api_key_prefix": api_key.key_prefix if api_key else None,
+        })
+    return result
 
 
 @app.delete("/runbooks/{source_file}", status_code=204)

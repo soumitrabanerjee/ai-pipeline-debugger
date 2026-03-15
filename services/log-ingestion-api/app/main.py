@@ -57,16 +57,16 @@ def get_db():
 def _get_workspace_from_api_key(
     x_api_key: Optional[str] = Header(default=None),
     db: Session = Depends(get_db),
-) -> Optional[str]:
+) -> str:
     """
-    Optional x-api-key header validation.
+    Required x-api-key header validation.
 
-    - Absent header: returns None (callers fall back to payload workspace_id).
+    - Absent header: raises 401.
     - Present but invalid/revoked: raises 401.
-    - Valid: returns the workspace_id bound to that key, overriding the payload.
+    - Valid: returns the workspace_id bound to that key.
     """
     if not x_api_key:
-        return None
+        raise HTTPException(status_code=401, detail="API key required. Include x-api-key header.")
     key_hash = hashlib.sha256(x_api_key.encode()).hexdigest()
     record = db.query(ApiKey).filter(
         ApiKey.key_hash == key_hash,
@@ -153,11 +153,10 @@ def _do_ingest(event: LogEvent, workspace_id: str, db: Session) -> dict:
 def ingest(
     event: LogEvent,
     db: Session = Depends(get_db),
-    api_key_workspace: Optional[str] = Depends(_get_workspace_from_api_key),
+    api_key_workspace: str = Depends(_get_workspace_from_api_key),
 ):
-    # API key workspace overrides the payload field when a valid key is supplied
-    workspace_id = api_key_workspace or event.workspace_id
-    return _do_ingest(event, workspace_id, db)
+    # API key workspace always overrides the payload field
+    return _do_ingest(event, api_key_workspace, db)
 
 
 class GenericWebhookEvent(BaseModel):
@@ -171,22 +170,21 @@ class GenericWebhookEvent(BaseModel):
 def webhook_generic(
     event: GenericWebhookEvent,
     db: Session = Depends(get_db),
-    api_key_workspace: Optional[str] = Depends(_get_workspace_from_api_key),
+    api_key_workspace: str = Depends(_get_workspace_from_api_key),
 ):
     """Simplified webhook — accepts {pipeline, level, message, timestamp}."""
-    ts           = event.timestamp or datetime.now(timezone.utc).isoformat()
-    run_id       = f"{event.pipeline}-{uuid.uuid4().hex[:8]}"
-    workspace_id = api_key_workspace or "default"
+    ts     = event.timestamp or datetime.now(timezone.utc).isoformat()
+    run_id = f"{event.pipeline}-{uuid.uuid4().hex[:8]}"
     synthetic = LogEvent(
         source       = "webhook",
-        workspace_id = workspace_id,
+        workspace_id = api_key_workspace,
         job_id       = event.pipeline,
         run_id       = run_id,
         level        = event.level.upper(),
         timestamp    = ts,
         message      = event.message,
     )
-    return _do_ingest(synthetic, workspace_id, db)
+    return _do_ingest(synthetic, api_key_workspace, db)
 
 
 class AirflowWebhookEvent(BaseModel):
@@ -208,7 +206,7 @@ class AirflowWebhookEvent(BaseModel):
 def webhook_airflow(
     event: AirflowWebhookEvent,
     db: Session = Depends(get_db),
-    api_key_workspace: Optional[str] = Depends(_get_workspace_from_api_key),
+    api_key_workspace: str = Depends(_get_workspace_from_api_key),
 ):
     """
     Airflow on_failure_callback / on_success_callback webhook.
@@ -222,14 +220,13 @@ def webhook_airflow(
       execution_date→ timestamp
     """
     failed_states = {"failed", "upstream_failed", "up_for_retry"}
-    level        = "ERROR" if event.state.lower() in failed_states else "INFO"
-    ts           = event.execution_date or datetime.now(timezone.utc).isoformat()
-    message      = event.exception or f"DAG {event.dag_id} — task {event.task_id or 'N/A'} {event.state}"
-    workspace_id = api_key_workspace or "default"
+    level   = "ERROR" if event.state.lower() in failed_states else "INFO"
+    ts      = event.execution_date or datetime.now(timezone.utc).isoformat()
+    message = event.exception or f"DAG {event.dag_id} — task {event.task_id or 'N/A'} {event.state}"
 
     synthetic = LogEvent(
         source       = "airflow",
-        workspace_id = workspace_id,
+        workspace_id = api_key_workspace,
         job_id       = event.dag_id,
         run_id       = event.run_id,
         task_id      = event.task_id,
@@ -238,4 +235,4 @@ def webhook_airflow(
         message      = message,
         raw_log_uri  = event.log_url,
     )
-    return _do_ingest(synthetic, workspace_id, db)
+    return _do_ingest(synthetic, api_key_workspace, db)

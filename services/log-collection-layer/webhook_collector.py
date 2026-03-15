@@ -32,7 +32,7 @@ import requests
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, Header, HTTPException
 from pydantic import BaseModel
 
 INGEST_URL   = os.getenv("INGEST_URL",   "http://localhost:8000/ingest")
@@ -70,10 +70,10 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _forward(payload: dict):
+def _forward(payload: dict, api_key: str):
     """POST the normalised event to the ingestion API (fire-and-forget)."""
     try:
-        resp = requests.post(INGEST_URL, json=payload, timeout=10)
+        resp = requests.post(INGEST_URL, json=payload, headers={"x-api-key": api_key}, timeout=10)
         print(
             f"[webhook] Forwarded pipeline={payload['job_id']} "
             f"run={payload['run_id']} → HTTP {resp.status_code}"
@@ -210,7 +210,7 @@ def run_student_analytics_sync():
 
 
 @app.post("/webhook/airflow", status_code=202)
-def airflow_webhook(body: AirflowWebhook, background: BackgroundTasks):
+def airflow_webhook(body: AirflowWebhook, background: BackgroundTasks, x_api_key: Optional[str] = Header(default=None)):
     """
     Accepts Airflow on_failure_callback payloads.
 
@@ -218,6 +218,7 @@ def airflow_webhook(body: AirflowWebhook, background: BackgroundTasks):
       default_args = {
           "on_failure_callback": lambda ctx: requests.post(
               "http://collector:8003/webhook/airflow",
+              headers={"x-api-key": "<your-api-key>"},
               json={
                   "dag_id": ctx["dag"].dag_id,
                   "run_id": ctx["run_id"],
@@ -227,9 +228,10 @@ def airflow_webhook(body: AirflowWebhook, background: BackgroundTasks):
           )
       }
     """
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="API key required")
     payload = {
         "source": "airflow",
-        "workspace_id": "default",
         "job_id": body.dag_id,
         "run_id": body.run_id,
         "task_id": body.task_id,
@@ -238,29 +240,31 @@ def airflow_webhook(body: AirflowWebhook, background: BackgroundTasks):
         "message": body.exception,
         "raw_log_uri": body.log_url,
     }
-    background.add_task(_forward, payload)
+    background.add_task(_forward, payload, x_api_key)
     return {"status": "accepted", "run_id": body.run_id}
 
 
 @app.post("/webhook/generic", status_code=202)
-def generic_webhook(body: GenericWebhook, background: BackgroundTasks):
+def generic_webhook(body: GenericWebhook, background: BackgroundTasks, x_api_key: Optional[str] = Header(default=None)):
     """
     Generic webhook — works with any system that can HTTP POST.
 
     Example curl:
       curl -X POST http://localhost:8003/webhook/generic \\
            -H 'Content-Type: application/json' \\
+           -H 'x-api-key: <your-api-key>' \\
            -d '{"pipeline":"my-etl","level":"ERROR","message":"OOM error"}'
     """
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="API key required")
     run_id = body.run_id or str(uuid.uuid4())
     payload = {
         "source": body.source or "webhook",
-        "workspace_id": "default",
         "job_id": body.pipeline,
         "run_id": run_id,
         "level": body.level.upper(),
         "timestamp": body.timestamp or _now_iso(),
         "message": body.message,
     }
-    background.add_task(_forward, payload)
+    background.add_task(_forward, payload, x_api_key)
     return {"status": "accepted", "run_id": run_id}

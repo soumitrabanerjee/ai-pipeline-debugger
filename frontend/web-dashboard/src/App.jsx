@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
-import LandingPage  from './components/LandingPage'
-import HomePage     from './components/HomePage'
-import LoginPage    from './components/LoginPage'
-import PaymentPage  from './components/PaymentPage'
-import Dashboard    from './components/Dashboard'
+import LandingPage    from './components/LandingPage'
+import HomePage       from './components/HomePage'
+import LoginPage      from './components/LoginPage'
+import PaymentPage    from './components/PaymentPage'
+import Dashboard      from './components/Dashboard'
+import AdminDashboard from './components/AdminDashboard'
 import { API_URL as API } from './config'
 
 export default function App() {
@@ -12,7 +13,7 @@ export default function App() {
   const [theme, setTheme]     = useState(() => localStorage.getItem('apd_theme') || 'dark')
 
   // Pages that require a paid account — restored on refresh only if user is paid
-  const AUTHED_PAGES = new Set(['home', 'dashboard'])
+  const AUTHED_PAGES = new Set(['home', 'dashboard', 'admin'])
 
   const navigate = (p) => {
     setPage(p)
@@ -69,8 +70,9 @@ export default function App() {
 
   if (page === null)        return <div style={{ minHeight: '100vh', background: '#0a0f1e' }} />
   if (page === 'landing')   return <LandingPage  onEnterDashboard={() => navigate(user ? (user.paid ? 'home' : 'payment') : 'login')} onLogin={() => navigate('login')} onSignOut={handleSignOut} user={user} />
-  if (page === 'home')      return <HomePage     user={user} onOpenDashboard={() => navigate('dashboard')} onSignOut={handleSignOut} theme={theme} toggleTheme={toggleTheme} />
+  if (page === 'home')      return <HomePage     user={user} onOpenDashboard={() => navigate('dashboard')} onOpenAdmin={() => navigate('admin')} onSignOut={handleSignOut} theme={theme} toggleTheme={toggleTheme} />
   if (page === 'login')     return <LoginPage    onLogin={handleLogin} onBack={() => navigate('landing')} />
   if (page === 'payment')   return <PaymentPage  user={user} onPaymentComplete={handlePaymentComplete} onSignOut={handleSignOut} />
   if (page === 'dashboard') return <Dashboard    onBack={() => navigate('home')} user={user} onSignOut={handleSignOut} theme={theme} toggleTheme={toggleTheme} />
+  if (page === 'admin')     return <AdminDashboard user={user} onSignOut={handleSignOut} theme={theme} toggleTheme={toggleTheme} onBack={() => navigate('home')} />
 }

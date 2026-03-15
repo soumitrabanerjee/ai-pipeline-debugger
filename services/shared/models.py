@@ -86,6 +86,7 @@ class User(Base):
     plan          = Column(String,  nullable=True)
     session_token = Column(String,  nullable=True, unique=True, index=True)
     created_at    = Column(String,  nullable=False)
+    is_admin      = Column(Boolean, nullable=False, default=False, server_default="false")
 
 
 class RunbookChunk(Base):

@@ -3,12 +3,18 @@ import { formatTimestamp } from '../utils/dashboardUtils'
 import PiPlexLogo from './PiPlexLogo'
 import { API_URL as API, WEBHOOK_URL, INGEST_URL } from '../config'
 
-const HOST = window.location.hostname
-const SERVICES = [
-  { name: 'Ingestion API',       port: 8000, url: `http://${HOST}:8000/health` },
-  { name: 'API Layer',           port: 8001, url: `http://${HOST}:8001/health` },
-  { name: 'AI Engine',           port: 8002, url: `http://${HOST}:8002/health` },
-  { name: 'Webhook Collector',   port: 8003, url: `http://${HOST}:8003/health` },
+const HOST   = window.location.hostname
+const isProd = HOST === 'piplex.in' || HOST === 'www.piplex.in'
+const SERVICES = isProd ? [
+  { name: 'Ingestion API',     port: 8000, url: `https://${HOST}/health/ingestion` },
+  { name: 'API Layer',         port: 8001, url: `https://${HOST}/api/health`       },
+  { name: 'AI Engine',         port: 8002, url: `https://${HOST}/health/ai`       },
+  { name: 'Webhook Collector', port: 8003, url: `https://${HOST}/health/webhook`   },
+] : [
+  { name: 'Ingestion API',     port: 8000, url: `http://${HOST}:8000/health` },
+  { name: 'API Layer',         port: 8001, url: `http://${HOST}:8001/health` },
+  { name: 'AI Engine',         port: 8002, url: `http://${HOST}:8002/health` },
+  { name: 'Webhook Collector', port: 8003, url: `http://${HOST}:8003/health` },
 ]
 
 function useServiceHealth() {
@@ -47,7 +53,7 @@ function useDashboardData() {
   return data
 }
 
-export default function HomePage({ user, onOpenDashboard, onSignOut, theme, toggleTheme }) {
+export default function HomePage({ user, onOpenDashboard, onOpenAdmin, onSignOut, theme, toggleTheme }) {
   const health = useServiceHealth()
   const data   = useDashboardData()
 
@@ -220,6 +226,11 @@ export default function HomePage({ user, onOpenDashboard, onSignOut, theme, togg
               <button className="dashboard-button" style={{ justifyContent: 'flex-start' }} onClick={onOpenDashboard}>
                 Open Dashboard →
               </button>
+              {user?.is_admin && (
+                <button className="dashboard-button" style={{ justifyContent: 'flex-start', background: 'var(--accent)' }} onClick={onOpenAdmin}>
+                  Admin Panel →
+                </button>
+              )}
               <div style={{ background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', padding: '0.75rem', border: '1px solid var(--border)' }}>
                 <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Airflow webhook URL</div>
                 <code style={{ fontSize: '0.78rem', color: 'var(--accent)', wordBreak: 'break-all' }}>
