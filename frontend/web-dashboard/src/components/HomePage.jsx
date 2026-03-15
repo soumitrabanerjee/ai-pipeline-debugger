@@ -88,6 +88,9 @@ export default function HomePage({ user, onOpenDashboard, onOpenAdmin, onSignOut
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
             <button className="dashboard-button" onClick={onOpenDashboard}>Open Dashboard →</button>
+            {user?.is_admin && (
+              <button className="dashboard-button" style={{ background: 'var(--accent)' }} onClick={onOpenAdmin}>Admin →</button>
+            )}
             <button className="dashboard-button btn-ghost" onClick={onSignOut}>Sign out</button>
           </div>
         </div>

@@ -74,7 +74,7 @@ export default function App() {
   if (page === 'home')      return <HomePage     user={user} onOpenDashboard={() => navigate('dashboard')} onOpenAdmin={() => navigate('admin')} onSignOut={handleSignOut} theme={theme} toggleTheme={toggleTheme} />
   if (page === 'login')     return <LoginPage    onLogin={handleLogin} onBack={() => navigate('landing')} />
   if (page === 'payment')   return <PaymentPage  user={user} onPaymentComplete={handlePaymentComplete} onSignOut={handleSignOut} />
-  if (page === 'dashboard') return <Dashboard    onBack={() => navigate('home')} user={user} onSignOut={handleSignOut} theme={theme} toggleTheme={toggleTheme} />
+  if (page === 'dashboard') return <Dashboard    onBack={() => navigate('home')} user={user} onSignOut={handleSignOut} theme={theme} toggleTheme={toggleTheme} onOpenAdmin={() => navigate('admin')} />
   if (page === 'admin')     return user?.is_admin
     ? <AdminDashboard user={user} onSignOut={handleSignOut} theme={theme} toggleTheme={toggleTheme} onBack={() => navigate('home')} />
     : <HomePage user={user} onOpenDashboard={() => navigate('dashboard')} onOpenAdmin={() => navigate('admin')} onSignOut={handleSignOut} theme={theme} toggleTheme={toggleTheme} />

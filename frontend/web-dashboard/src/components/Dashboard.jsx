@@ -4,7 +4,7 @@ import CreatePipelineForm from './CreatePipelineForm'
 import { formatTimestamp, sortErrors, sortRuns, truncateRunId, TIMEZONE_OPTIONS } from '../utils/dashboardUtils'
 import PiPlexLogo from './PiPlexLogo'
 import { API_URL } from '../config'
-export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme }) {
+export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme, onOpenAdmin }) {
   const [query, setQuery]                       = useState('')
   const [data, setData]                         = useState({ pipelines: [], errors: [] })
   const [loading, setLoading]                   = useState(true)
@@ -225,6 +225,9 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme 
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
             {onBack && <button className="dashboard-button" onClick={onBack}>← Home</button>}
+            {user?.is_admin && onOpenAdmin && (
+              <button className="dashboard-button" style={{ background: 'var(--accent)' }} onClick={onOpenAdmin}>Admin →</button>
+            )}
             <button className="dashboard-button btn-ghost" onClick={onSignOut}>Sign out</button>
           </div>
         </div>
