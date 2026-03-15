@@ -70,7 +70,9 @@ export default function HomePage({ user, onOpenDashboard, onOpenAdmin, onSignOut
 
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
-  const firstName = user?.name?.split(' ')[0] || user?.email?.split('@')[0] || 'there'
+  const firstName = user?.name?.trim()?.split(' ')?.[0]?.trim()
+    || user?.email?.split('@')?.[0]?.trim()
+    || 'there'
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-page)', color: 'var(--text)', paddingTop: '72px' }}>
