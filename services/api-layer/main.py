@@ -388,11 +388,17 @@ async def lifespan(app: FastAPI):
         ))
 
         # ── Clean up orphaned unverified users from old buggy flow ────────────
-        # Old code wrote User rows before OTP was verified. These are safe to
-        # delete because no API key or pipeline data exists for them yet.
+        # Guard: only delete if the column exists (it may never have been added
+        # if the server skipped the intermediate deploy that introduced it).
         conn.execute(text("""
-            DELETE FROM users
-            WHERE is_email_verified = false
+            DO $$ BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'users' AND column_name = 'is_email_verified'
+                ) THEN
+                    DELETE FROM users WHERE is_email_verified = false;
+                END IF;
+            END $$;
         """))
 
         # ── Drop OTP columns from users (no longer needed there) ─────────────

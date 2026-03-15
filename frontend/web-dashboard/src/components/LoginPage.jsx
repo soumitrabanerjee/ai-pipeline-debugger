@@ -70,7 +70,8 @@ export default function LoginPage({ onLogin, onBack }) {
         return
       }
       onLogin(data.token, data.user)
-    } catch {
+    } catch (err) {
+      console.error('[login] handleSubmit error:', err)
       setError('Could not reach the server. Make sure the API is running.')
     } finally {
       setLoading(false)
