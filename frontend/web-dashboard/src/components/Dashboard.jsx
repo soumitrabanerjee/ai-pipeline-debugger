@@ -17,6 +17,48 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme,
   const [detailLoading, setDetailLoading]       = useState(false)
   const [errorSort, setErrorSort]               = useState('timestamp') // 'timestamp' | 'pipeline'
   const [timezone, setTimezone]                 = useState('local')
+  const [apiKeys, setApiKeys]                   = useState([])
+  const [newKeyName, setNewKeyName]             = useState('')
+  const [newKeyValue, setNewKeyValue]           = useState(null)  // shown once after creation
+  const [keyLoading, setKeyLoading]             = useState(false)
+  const [keyError, setKeyError]                 = useState(null)
+
+  const fetchApiKeys = async () => {
+    const token = localStorage.getItem('apd_token')
+    try {
+      const res = await fetch(`${API_URL}/api-keys`, { headers: { 'x-session-token': token } })
+      if (res.ok) setApiKeys(await res.json())
+    } catch { /* silent */ }
+  }
+
+  const handleCreateKey = async (e) => {
+    e.preventDefault()
+    if (!newKeyName.trim()) { setKeyError('Enter a name for the key.'); return }
+    setKeyLoading(true); setKeyError(null)
+    const token = localStorage.getItem('apd_token')
+    try {
+      const res = await fetch(`${API_URL}/api-keys`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-session-token': token },
+        body: JSON.stringify({ name: newKeyName.trim() }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setKeyError(data.detail || 'Failed to create key.'); return }
+      setNewKeyValue(data.key)
+      setNewKeyName('')
+      fetchApiKeys()
+    } catch { setKeyError('Could not reach the server.') }
+    finally { setKeyLoading(false) }
+  }
+
+  const handleRevokeKey = async (keyId) => {
+    if (!window.confirm('Revoke this API key? Any pipelines using it will stop sending events.')) return
+    const token = localStorage.getItem('apd_token')
+    try {
+      await fetch(`${API_URL}/api-keys/${keyId}`, { method: 'DELETE', headers: { 'x-session-token': token } })
+      fetchApiKeys()
+    } catch { /* silent */ }
+  }
 
   const fetchData = async (isInitial = false) => {
     if (isInitial) setLoading(true)
@@ -38,6 +80,7 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme,
 
   useEffect(() => {
     fetchData(true)
+    fetchApiKeys()
     const id = setInterval(() => fetchData(false), 5000)
     return () => clearInterval(id)
   }, [])
@@ -342,6 +385,74 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme,
               </div>
             </div>
           ))}
+        </section>
+
+        <section className="db-section">
+          <div className="db-section-header">
+            <h2 className="db-section-title">API Keys</h2>
+            <span className="db-count-badge">{apiKeys.filter(k => k.is_active).length} active</span>
+          </div>
+
+          {/* New key revealed after creation */}
+          {newKeyValue && (
+            <div style={{ background: 'var(--accent-subtle)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '10px', padding: '1rem 1.25rem', marginBottom: '1rem' }}>
+              <p style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text)', marginBottom: '0.4rem' }}>
+                🔑 New key created — copy it now, it won't be shown again.
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <code style={{ flex: 1, fontSize: '0.78rem', color: 'var(--accent)', wordBreak: 'break-all', background: 'var(--bg-input)', padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                  {newKeyValue}
+                </code>
+                <button className="lp-btn-primary" style={{ fontSize: '0.78rem', padding: '0.4rem 0.9rem', whiteSpace: 'nowrap' }}
+                  onClick={() => { navigator.clipboard.writeText(newKeyValue); setNewKeyValue(null) }}>
+                  Copy &amp; Close
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Existing keys list */}
+          {apiKeys.length === 0 ? (
+            <div className="db-empty"><p>No API keys yet.</p></div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
+              {apiKeys.map(k => (
+                <div key={k.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '10px', padding: '0.75rem 1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1, minWidth: 0 }}>
+                    <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{k.name}</span>
+                    <code style={{ fontSize: '0.75rem', color: 'var(--text-muted)', background: 'var(--bg-input)', padding: '0.15rem 0.5rem', borderRadius: '6px', whiteSpace: 'nowrap' }}>{k.key_prefix}...</code>
+                    <span style={{ fontSize: '0.7rem', fontWeight: 600, padding: '0.15rem 0.5rem', borderRadius: 'var(--radius-full)', background: k.is_active ? 'var(--success-bg)' : 'var(--failed-bg)', color: k.is_active ? 'var(--success-text)' : 'var(--failed-text)', border: `1px solid ${k.is_active ? 'var(--success-border)' : 'var(--failed-border)'}`, whiteSpace: 'nowrap' }}>
+                      {k.is_active ? 'Active' : 'Revoked'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexShrink: 0 }}>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{k.created_at?.slice(0, 10)}</span>
+                    {k.is_active && (
+                      <button className="lp-btn-ghost" style={{ fontSize: '0.75rem', padding: '0.25rem 0.65rem', color: 'var(--failed-text)' }}
+                        onClick={() => handleRevokeKey(k.id)}>
+                        Revoke
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Generate new key form */}
+          <form onSubmit={handleCreateKey} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <input
+              className="db-search-input"
+              placeholder="Key name, e.g. airflow-prod"
+              value={newKeyName}
+              onChange={e => setNewKeyName(e.target.value)}
+              style={{ flex: 1, minWidth: '180px', paddingLeft: '1rem' }}
+            />
+            <button className="lp-btn-primary" type="submit" disabled={keyLoading} style={{ whiteSpace: 'nowrap' }}>
+              {keyLoading ? <span className="auth-spinner" /> : '+ Generate Key'}
+            </button>
+          </form>
+          {keyError && <p style={{ color: 'var(--failed-text)', fontSize: '0.8rem', marginTop: '0.4rem' }}>{keyError}</p>}
         </section>
 
       </main>
