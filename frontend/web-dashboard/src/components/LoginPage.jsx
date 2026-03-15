@@ -59,7 +59,7 @@ export default function LoginPage({ onLogin, onBack }) {
       }
 
       if (tab === 'signup' && data.needs_verification) {
-        setPendingEmail(req.email)
+        setPendingEmail(email)
         setNeedsOtp(true)
         return
       }

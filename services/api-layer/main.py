@@ -475,8 +475,16 @@ def register(request: Request, req: RegisterRequest, db: Session = Depends(get_d
     existing = db.query(User).filter(User.email == req.email).first()
     if existing:
         if not existing.is_email_verified:
-            # Allow re-sending OTP for unverified accounts
-            raise HTTPException(status_code=409, detail="Account pending verification. Check your email for the OTP.")
+            # Refresh OTP and re-send so user isn't stuck
+            otp            = _generate_otp()
+            otp_expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+            existing.otp_code       = otp
+            existing.otp_expires_at = otp_expires_at
+            # Update password in case they mistyped it first time
+            existing.password_hash  = hash_password(req.password)
+            db.commit()
+            send_email(existing.email, "Your PiPlex verification code", _otp_email_html(existing.name or "", otp))
+            return {"token": "", "user": _user_out(existing), "api_key": None, "needs_verification": True}
         raise HTTPException(status_code=409, detail="An account with this email already exists")
 
     if SMTP_ENABLED:
