@@ -3,7 +3,7 @@
 const HOST   = window.location.hostname
 const isProd = HOST === 'piplex.in' || HOST === 'www.piplex.in'
 
-export const API_URL     = isProd ? 'https://piplex.in/api'              : `http://${HOST}:8001`
-export const INGEST_URL  = isProd ? `http://${HOST}:8000/ingest`          : `http://${HOST}:8000/ingest`
-export const WEBHOOK_URL = isProd ? `http://${HOST}:8003/webhook`         : `http://${HOST}:8003/webhook`
-export const AI_URL      = isProd ? `http://${HOST}:8002`                 : `http://${HOST}:8002`
+export const API_URL     = isProd ? 'https://piplex.in/api'     : `http://${HOST}:8001`
+export const INGEST_URL  = isProd ? 'https://piplex.in/ingest'  : `http://${HOST}:8000/ingest`
+export const WEBHOOK_URL = isProd ? 'https://piplex.in/webhook' : `http://${HOST}:8003/webhook`
+export const AI_URL      = isProd ? 'https://piplex.in/ai'      : `http://${HOST}:8002`
