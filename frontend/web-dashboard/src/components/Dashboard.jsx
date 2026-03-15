@@ -226,7 +226,7 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme,
             </button>
             {onBack && <button className="dashboard-button" onClick={onBack}>← Home</button>}
             {user?.is_admin && onOpenAdmin && (
-              <button className="dashboard-button" style={{ background: 'var(--accent)' }} onClick={onOpenAdmin}>Admin →</button>
+              <button className="dashboard-button" onClick={onOpenAdmin}>Admin →</button>
             )}
             <button className="dashboard-button btn-ghost" onClick={onSignOut}>Sign out</button>
           </div>
