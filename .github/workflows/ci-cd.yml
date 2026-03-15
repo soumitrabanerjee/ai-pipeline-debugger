@@ -42,11 +42,13 @@ jobs:
           SMTP_USER: ${{ secrets.SMTP_USER }}
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_MODEL: ${{ secrets.CLAUDE_MODEL }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: SMTP_HOST,SMTP_PORT,SMTP_USER,SMTP_PASS,SMTP_FROM
+          envs: SMTP_HOST,SMTP_PORT,SMTP_USER,SMTP_PASS,SMTP_FROM,ANTHROPIC_API_KEY,CLAUDE_MODEL
           script: |
             cd /opt/piplex
             git pull origin main
@@ -57,6 +59,8 @@ jobs:
             sed -i '/^SMTP_/d' .env
             sed -i '/^ALLOWED_ORIGINS/d' .env
             sed -i '/^ADMIN_EMAILS/d' .env
+            sed -i '/^ANTHROPIC_API_KEY/d' .env
+            sed -i '/^CLAUDE_MODEL/d' .env
 
             # CORS origins — always include both prod domains
             echo "ALLOWED_ORIGINS=http://localhost:5173,https://piplex.in,https://www.piplex.in" >> .env
@@ -70,6 +74,10 @@ jobs:
             echo "SMTP_USER=${SMTP_USER}"      >> .env
             echo "SMTP_PASS=${SMTP_PASS}"      >> .env
             echo "SMTP_FROM=${SMTP_FROM}"      >> .env
+
+            # Anthropic — required for AI debugging engine
+            echo "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}" >> .env
+            echo "CLAUDE_MODEL=${CLAUDE_MODEL:-claude-haiku-4-5-20251001}" >> .env
             chmod 600 .env
 
             # Sync Nginx config from repo and reload
