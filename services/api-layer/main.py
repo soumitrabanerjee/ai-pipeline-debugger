@@ -101,7 +101,8 @@ def send_email(to: str, subject: str, html: str) -> bool:
             server.sendmail(SMTP_FROM or SMTP_USER, to, msg.as_string())
         return True
     except Exception as e:
-        print(f"[api-layer] Email send failed to {to}: {e}")
+        print(f"[api-layer] SMTP ERROR sending to {to}: {type(e).__name__}: {e}")
+        print(f"[api-layer] SMTP config — host={SMTP_HOST} port={SMTP_PORT} user={SMTP_USER} from={SMTP_FROM}")
         return False
 
 def _generate_otp() -> str:
@@ -533,7 +534,15 @@ def register(request: Request, req: RegisterRequest, db: Session = Depends(get_d
             db.add(pending)
         db.commit()
 
-        send_email(req.email, "Your PiPlex verification code", _otp_email_html(req.name or "", otp))
+        sent = send_email(req.email, "Your PiPlex verification code", _otp_email_html(req.name or "", otp))
+        if not sent:
+            # Email failed — clean up pending row so the user can retry cleanly
+            db.query(PendingRegistration).filter(PendingRegistration.email == req.email).delete()
+            db.commit()
+            raise HTTPException(
+                status_code=503,
+                detail="Could not send verification email. Please check your email address or try again later."
+            )
         # Return a placeholder user shape — no real User row exists yet
         placeholder = {"email": req.email, "name": req.name, "paid": False, "plan": None, "is_admin": False}
         return {"token": "", "user": placeholder, "api_key": None, "needs_verification": True}
