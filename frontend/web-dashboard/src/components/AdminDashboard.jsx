@@ -6,6 +6,8 @@ export default function AdminDashboard({ user, onSignOut, theme, toggleTheme, on
   const [stats, setStats] = useState(null)
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
+  const [pwInput, setPwInput]   = useState('')
+  const [pwStatus, setPwStatus] = useState(null)   // null | 'saving' | 'ok' | 'error'
 
   useEffect(() => {
     const token = localStorage.getItem('apd_token')
@@ -79,6 +81,46 @@ export default function AdminDashboard({ user, onSignOut, theme, toggleTheme, on
             </div>
           </>
         )}
+
+        {/* ── Set / change password ── */}
+        <div className="db-stat-card" style={{ marginBottom: '1.5rem' }}>
+          <p className="db-stat-label" style={{ marginBottom: '0.75rem' }}>Account Password</p>
+          <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+            Set or update the password for <strong>{user?.email}</strong> so you can log in with email + password.
+          </p>
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              type="password"
+              placeholder="New password (min 8 chars)"
+              value={pwInput}
+              onChange={e => { setPwInput(e.target.value); setPwStatus(null) }}
+              style={{
+                background: 'var(--bg-input)', border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md)', padding: '0.5rem 0.75rem',
+                color: 'var(--text)', fontSize: '0.875rem', width: '260px',
+              }}
+            />
+            <button
+              className="dashboard-button"
+              disabled={pwStatus === 'saving' || pwInput.length < 8}
+              onClick={() => {
+                setPwStatus('saving')
+                const token = localStorage.getItem('apd_token')
+                fetch(`${API_URL}/auth/set-password`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'x-session-token': token },
+                  body: JSON.stringify({ password: pwInput }),
+                })
+                  .then(r => r.ok ? setPwStatus('ok') : setPwStatus('error'))
+                  .catch(() => setPwStatus('error'))
+              }}
+            >
+              {pwStatus === 'saving' ? 'Saving…' : 'Set Password'}
+            </button>
+            {pwStatus === 'ok'    && <span style={{ color: 'var(--success-text)', fontSize: '0.82rem' }}>Password updated!</span>}
+            {pwStatus === 'error' && <span style={{ color: 'var(--failed-text)',  fontSize: '0.82rem' }}>Failed — try again.</span>}
+          </div>
+        </div>
 
         <section className="db-section">
           <div className="db-section-header">

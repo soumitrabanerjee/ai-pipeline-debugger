@@ -487,6 +487,25 @@ def sign_out(request: Request, current_user: User = Depends(get_current_user), d
     current_user.session_token = None
     db.commit()
 
+
+class SetPasswordRequest(BaseModel):
+    password: str
+
+
+@app.post("/auth/set-password", status_code=204)
+@limiter.limit("10/minute")
+def set_password(
+    request: Request,
+    req: SetPasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if len(req.password) < 8:
+        raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
+    current_user.password_hash = hash_password(req.password)
+    db.commit()
+
+
 # ── Dashboard endpoints ────────────────────────────────────────────────────────
 
 @app.get("/dashboard", response_model=DashboardData)
