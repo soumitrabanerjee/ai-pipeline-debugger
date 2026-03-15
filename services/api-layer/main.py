@@ -1,9 +1,14 @@
 import sys
 import os
 import hashlib
+import random
 import secrets
+import smtplib
+import ssl
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from fastapi import FastAPI, Depends, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -68,6 +73,65 @@ def _set_rls_workspace(db: Session, workspace_id: str) -> None:
         db.execute(text("SET LOCAL app.workspace_id = :ws"), {"ws": workspace_id})
     except Exception:
         pass  # SQLite or non-PostgreSQL backend — RLS not supported
+
+# ── SMTP / email helpers ───────────────────────────────────────────────────────
+
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASS = os.getenv("SMTP_PASS", "")
+SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER)
+SMTP_ENABLED = bool(SMTP_HOST and SMTP_USER and SMTP_PASS)
+
+def send_email(to: str, subject: str, html: str) -> bool:
+    """Send an email via SMTP. Returns True on success, False if SMTP not configured or on error."""
+    if not SMTP_ENABLED:
+        return False
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = SMTP_FROM or SMTP_USER
+        msg["To"]      = to
+        msg.attach(MIMEText(html, "html"))
+        context = ssl.create_default_context()
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.ehlo()
+            server.starttls(context=context)
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_FROM or SMTP_USER, to, msg.as_string())
+        return True
+    except Exception as e:
+        print(f"[api-layer] Email send failed to {to}: {e}")
+        return False
+
+def _generate_otp() -> str:
+    return f"{random.randint(0, 999999):06d}"
+
+def _otp_email_html(name: str, otp: str) -> str:
+    display_name = name or "there"
+    return f"""
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#0f172a;color:#e2e8f0;border-radius:12px">
+      <h2 style="margin:0 0 8px;font-size:1.4rem;color:#fff">Verify your email</h2>
+      <p style="color:#94a3b8;margin:0 0 24px">Hi {display_name}, enter this 6-digit code to activate your PiPlex account.</p>
+      <div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px 24px;text-align:center;margin-bottom:24px">
+        <span style="font-size:2.5rem;font-weight:700;letter-spacing:0.4em;color:#818cf8;font-family:monospace">{otp}</span>
+      </div>
+      <p style="color:#64748b;font-size:0.8rem;margin:0">This code expires in 15 minutes. If you didn't sign up for PiPlex, ignore this email.</p>
+    </div>"""
+
+def _api_key_email_html(name: str, api_key: str) -> str:
+    display_name = name or "there"
+    return f"""
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;background:#0f172a;color:#e2e8f0;border-radius:12px">
+      <h2 style="margin:0 0 8px;font-size:1.4rem;color:#fff">Your PiPlex API Key</h2>
+      <p style="color:#94a3b8;margin:0 0 24px">Hi {display_name}, your account is ready! Here is your default API key — save it somewhere safe, it won't be shown again.</p>
+      <div style="background:#1e293b;border:1px solid #334155;border-radius:10px;padding:16px 20px;margin-bottom:24px;word-break:break-all;font-family:monospace;font-size:0.85rem;color:#818cf8">
+        {api_key}
+      </div>
+      <p style="color:#94a3b8;margin:0 0 8px">Use this key as the <code style="color:#818cf8">x-api-key</code> header when sending events to PiPlex.</p>
+      <p style="color:#64748b;font-size:0.8rem;margin:0">You can generate additional keys from the Dashboard → API Keys section.</p>
+    </div>"""
+
 
 # ── Pydantic schemas ───────────────────────────────────────────────────────────
 
@@ -134,6 +198,18 @@ class AuthResponse(BaseModel):
     token: str
     user: UserOut
     api_key: Optional[str] = None
+    needs_verification: bool = False
+
+class PromoRequest(BaseModel):
+    code: str
+    plan: str   # 'starter' | 'pro' | 'enterprise'
+
+class VerifyOtpRequest(BaseModel):
+    email: str
+    otp: str
+
+class ResendOtpRequest(BaseModel):
+    email: str
 
 # ── Lifespan ───────────────────────────────────────────────────────────────────
 
@@ -291,8 +367,11 @@ async def lifespan(app: FastAPI):
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_keys_workspace ON api_keys(workspace_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_keys_hash ON api_keys(key_hash)"))
 
-        # ── is_admin column on users ──────────────────────────────────────────
+        # ── is_admin / OTP / email verification columns on users ─────────────
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_code VARCHAR"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_expires_at VARCHAR"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_email_verified BOOLEAN NOT NULL DEFAULT true"))
         admin_emails_raw = os.getenv("ADMIN_EMAILS", "")
         if admin_emails_raw.strip():
             for ae in admin_emails_raw.split(","):
@@ -393,22 +472,113 @@ def _auto_create_api_key(user: User, db: Session) -> str:
 @app.post("/auth/register", response_model=AuthResponse, status_code=201)
 @limiter.limit("10/minute")
 def register(request: Request, req: RegisterRequest, db: Session = Depends(get_db)):
-    if db.query(User).filter(User.email == req.email).first():
+    existing = db.query(User).filter(User.email == req.email).first()
+    if existing:
+        if not existing.is_email_verified:
+            # Allow re-sending OTP for unverified accounts
+            raise HTTPException(status_code=409, detail="Account pending verification. Check your email for the OTP.")
         raise HTTPException(status_code=409, detail="An account with this email already exists")
+
+    if SMTP_ENABLED:
+        otp            = _generate_otp()
+        otp_expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+        user = User(
+            email             = req.email,
+            name              = req.name,
+            password_hash     = hash_password(req.password),
+            paid              = False,
+            session_token     = None,          # set after OTP verified
+            created_at        = datetime.now(timezone.utc).isoformat(),
+            otp_code          = otp,
+            otp_expires_at    = otp_expires_at,
+            is_email_verified = False,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        send_email(req.email, "Your PiPlex verification code", _otp_email_html(req.name or "", otp))
+        return {"token": "", "user": _user_out(user), "api_key": None, "needs_verification": True}
+
+    # SMTP not configured — skip verification, activate immediately
     token = secrets.token_urlsafe(32)
     user  = User(
-        email         = req.email,
-        name          = req.name,
-        password_hash = hash_password(req.password),
-        paid          = False,
-        session_token = token,
-        created_at    = datetime.now(timezone.utc).isoformat(),
+        email             = req.email,
+        name              = req.name,
+        password_hash     = hash_password(req.password),
+        paid              = False,
+        session_token     = token,
+        created_at        = datetime.now(timezone.utc).isoformat(),
+        is_email_verified = True,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
     raw_key = _auto_create_api_key(user, db)
     return {"token": token, "user": _user_out(user), "api_key": raw_key}
+
+
+@app.post("/auth/verify-otp", response_model=AuthResponse)
+@limiter.limit("10/minute")
+def verify_otp(request: Request, req: VerifyOtpRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == req.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="No account found with that email.")
+    if user.is_email_verified:
+        raise HTTPException(status_code=400, detail="Email already verified. Please sign in.")
+    if not user.otp_code or user.otp_code != req.otp:
+        raise HTTPException(status_code=400, detail="Invalid OTP code. Please try again.")
+    if user.otp_expires_at:
+        try:
+            expires = datetime.fromisoformat(user.otp_expires_at)
+            if expires < datetime.now(timezone.utc):
+                raise HTTPException(status_code=400, detail="OTP has expired. Please sign up again.")
+        except ValueError:
+            pass
+
+    token = secrets.token_urlsafe(32)
+    user.is_email_verified = True
+    user.otp_code          = None
+    user.otp_expires_at    = None
+    user.session_token     = token
+    db.commit()
+    db.refresh(user)
+
+    raw_key = _auto_create_api_key(user, db)
+    send_email(user.email, "Your PiPlex API Key", _api_key_email_html(user.name or "", raw_key))
+    return {"token": token, "user": _user_out(user), "api_key": raw_key}
+
+
+@app.post("/auth/resend-otp", status_code=204)
+@limiter.limit("5/minute")
+def resend_otp(request: Request, req: ResendOtpRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == req.email).first()
+    if not user or user.is_email_verified:
+        return  # silent — don't reveal whether email exists
+    otp            = _generate_otp()
+    otp_expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
+    user.otp_code       = otp
+    user.otp_expires_at = otp_expires_at
+    db.commit()
+    send_email(user.email, "Your PiPlex verification code", _otp_email_html(user.name or "", otp))
+
+
+@app.post("/auth/apply-promo", response_model=UserOut)
+@limiter.limit("10/minute")
+def apply_promo(
+    request: Request,
+    req: PromoRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if req.code.strip().upper() != "WELCOMETOPIPLEX":
+        raise HTTPException(status_code=400, detail="Invalid promo code.")
+    if req.plan not in ("starter", "pro", "enterprise"):
+        raise HTTPException(status_code=400, detail="Invalid plan.")
+    current_user.paid = True
+    current_user.plan = req.plan
+    db.commit()
+    db.refresh(current_user)
+    return _user_out(current_user)
 
 @app.post("/auth/login", response_model=AuthResponse)
 @limiter.limit("10/minute")

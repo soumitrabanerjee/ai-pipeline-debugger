@@ -33,15 +33,6 @@ const PLANS = [
   },
 ]
 
-function CardIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-      <rect x="1" y="4" width="22" height="16" rx="2"/>
-      <line x1="1" y1="10" x2="23" y2="10"/>
-    </svg>
-  )
-}
-
 function LockIcon() {
   return (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -53,43 +44,29 @@ function LockIcon() {
 
 export default function PaymentPage({ user, onPaymentComplete, onSignOut }) {
   const [selectedPlan, setSelectedPlan] = useState('pro')
-  const [step, setStep]                 = useState('plan')   // 'plan' | 'card'
+  const [step, setStep]                 = useState('plan')   // 'plan' | 'promo'
   const [loading, setLoading]           = useState(false)
-  const [cardNumber, setCardNumber]     = useState('')
-  const [expiry, setExpiry]             = useState('')
-  const [cvc, setCvc]                   = useState('')
-  const [cardName, setCardName]         = useState('')
+  const [promoCode, setPromoCode]       = useState('WELCOMETOPIPLEX')
   const [error, setError]               = useState(null)
 
   const plan = PLANS.find(p => p.id === selectedPlan)
 
-  const formatCardNumber = (v) =>
-    v.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim()
-
-  const formatExpiry = (v) => {
-    const d = v.replace(/\D/g, '').slice(0, 4)
-    return d.length > 2 ? `${d.slice(0, 2)} / ${d.slice(2)}` : d
-  }
-
-  const handlePayment = async (e) => {
+  const handleApplyPromo = async (e) => {
     e.preventDefault()
     setError(null)
-    if (!cardName)   { setError('Name on card is required.'); return }
-    if (cardNumber.replace(/\s/g, '').length < 16) { setError('Enter a valid 16-digit card number.'); return }
-    if (expiry.replace(/\s\/\s/g, '').length < 4)  { setError('Enter a valid expiry date.'); return }
-    if (cvc.length < 3) { setError('Enter a valid CVC.'); return }
+    if (!promoCode.trim()) { setError('Please enter a promo code.'); return }
 
     setLoading(true)
     try {
       const token = localStorage.getItem('apd_token')
-      const res = await fetch(`${API}/auth/payment`, {
+      const res = await fetch(`${API}/auth/apply-promo`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-session-token': token },
-        body: JSON.stringify({ plan: selectedPlan }),
+        body: JSON.stringify({ code: promoCode.trim(), plan: selectedPlan }),
       })
-      const updatedUser = await res.json()
-      if (!res.ok) { setError(updatedUser.detail || 'Payment failed.'); return }
-      onPaymentComplete(updatedUser)
+      const data = await res.json()
+      if (!res.ok) { setError(data.detail || 'Failed to apply promo code.'); return }
+      onPaymentComplete(data)
     } catch {
       setError('Could not reach the server. Please try again.')
     } finally {
@@ -97,7 +74,7 @@ export default function PaymentPage({ user, onPaymentComplete, onSignOut }) {
     }
   }
 
-  if (selectedPlan === 'enterprise' && step === 'card') {
+  if (selectedPlan === 'enterprise' && step === 'promo') {
     return (
       <div className="auth-shell">
         <div className="auth-glow auth-glow-left" />
@@ -178,9 +155,9 @@ export default function PaymentPage({ user, onPaymentComplete, onSignOut }) {
           <div style={{ textAlign: 'center', marginTop: '2rem' }}>
             <button
               className="lp-btn-primary lp-btn-lg"
-              onClick={() => setStep('card')}
+              onClick={() => setStep('promo')}
             >
-              Continue with {plan.name} {plan.price}{plan.period} →
+              Continue with {plan.name} →
             </button>
           </div>
         </div>
@@ -192,70 +169,51 @@ export default function PaymentPage({ user, onPaymentComplete, onSignOut }) {
             </button>
 
             <div className="auth-card-header">
-              <h2 className="auth-title">Payment details</h2>
+              <h2 className="auth-title">Apply promo code</h2>
               <div className="pay-order-summary">
                 <span>{plan.name} plan</span>
-                <span className="pay-order-price">{plan.price}{plan.period}</span>
+                <span className="pay-order-price" style={{ color: 'var(--success-text)', textDecoration: 'line-through var(--text-muted)' }}>
+                  {plan.price !== 'Custom' ? <><s style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{plan.price}{plan.period}</s> Free</> : plan.price}
+                </span>
               </div>
             </div>
 
-            <form className="auth-form" onSubmit={handlePayment}>
+            <div style={{
+              background: 'var(--accent-subtle)',
+              border: '1px solid rgba(99,102,241,0.3)',
+              borderRadius: '10px',
+              padding: '0.875rem 1rem',
+              fontSize: '0.82rem',
+              color: 'var(--text-secondary)',
+              marginBottom: '1.25rem',
+            }}>
+              <strong style={{ color: 'var(--text)' }}>🎉 100% off — all plans are free during beta.</strong>
+              <span style={{ display: 'block', marginTop: '0.25rem', color: 'var(--text-muted)' }}>
+                The promo code below is pre-filled for you. Just click Activate.
+              </span>
+            </div>
+
+            <form className="auth-form" onSubmit={handleApplyPromo}>
               <div className="auth-field">
-                <label className="auth-label">Name on card</label>
+                <label className="auth-label">Promo code</label>
                 <input
                   className="auth-input"
-                  placeholder="Ada Lovelace"
-                  value={cardName}
-                  onChange={e => setCardName(e.target.value)}
+                  placeholder="WELCOMETOPIPLEX"
+                  value={promoCode}
+                  onChange={e => setPromoCode(e.target.value.toUpperCase())}
+                  style={{ fontFamily: 'monospace', letterSpacing: '0.08em', fontWeight: 600 }}
                 />
-              </div>
-              <div className="auth-field">
-                <label className="auth-label">Card number</label>
-                <div className="auth-input-icon-wrap">
-                  <input
-                    className="auth-input auth-input-icon"
-                    placeholder="1234 5678 9012 3456"
-                    value={cardNumber}
-                    onChange={e => setCardNumber(formatCardNumber(e.target.value))}
-                    inputMode="numeric"
-                  />
-                  <span className="auth-input-icon-el"><CardIcon /></span>
-                </div>
-              </div>
-              <div className="auth-row">
-                <div className="auth-field">
-                  <label className="auth-label">Expiry</label>
-                  <input
-                    className="auth-input"
-                    placeholder="MM / YY"
-                    value={expiry}
-                    onChange={e => setExpiry(formatExpiry(e.target.value))}
-                    inputMode="numeric"
-                  />
-                </div>
-                <div className="auth-field">
-                  <label className="auth-label">CVC</label>
-                  <input
-                    className="auth-input"
-                    placeholder="123"
-                    value={cvc}
-                    onChange={e => setCvc(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                    inputMode="numeric"
-                  />
-                </div>
               </div>
 
               {error && <p className="auth-error">{error}</p>}
 
               <button className="lp-btn-primary auth-submit" type="submit" disabled={loading}>
-                {loading
-                  ? <span className="auth-spinner" />
-                  : `Pay ${plan.price}${plan.period} and activate`}
+                {loading ? <span className="auth-spinner" /> : `Activate ${plan.name} for free →`}
               </button>
             </form>
 
             <p className="pay-secure-note">
-              <LockIcon /> Payments are encrypted and secure. This is a demo — no real charge is made.
+              <LockIcon /> No credit card required. Upgrade options will be available later.
             </p>
           </div>
         </div>

@@ -78,15 +78,18 @@ class User(Base):
         ),
     )
 
-    id            = Column(Integer, primary_key=True, index=True)
-    email         = Column(String,  unique=True, index=True, nullable=False)
-    name          = Column(String,  nullable=True)
-    password_hash = Column(String,  nullable=False)
-    paid          = Column(Boolean, nullable=False, default=False, server_default="false")
-    plan          = Column(String,  nullable=True)
-    session_token = Column(String,  nullable=True, unique=True, index=True)
-    created_at    = Column(String,  nullable=False)
-    is_admin      = Column(Boolean, nullable=False, default=False, server_default="false")
+    id                = Column(Integer, primary_key=True, index=True)
+    email             = Column(String,  unique=True, index=True, nullable=False)
+    name              = Column(String,  nullable=True)
+    password_hash     = Column(String,  nullable=False)
+    paid              = Column(Boolean, nullable=False, default=False, server_default="false")
+    plan              = Column(String,  nullable=True)
+    session_token     = Column(String,  nullable=True, unique=True, index=True)
+    created_at        = Column(String,  nullable=False)
+    is_admin          = Column(Boolean, nullable=False, default=False, server_default="false")
+    otp_code          = Column(String,  nullable=True)
+    otp_expires_at    = Column(String,  nullable=True)
+    is_email_verified = Column(Boolean, nullable=False, default=True, server_default="true")
 
 
 class RunbookChunk(Base):

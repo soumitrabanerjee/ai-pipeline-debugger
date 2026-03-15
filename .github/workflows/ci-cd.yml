@@ -36,13 +36,32 @@ jobs:
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: SMTP_HOST,SMTP_PORT,SMTP_USER,SMTP_PASS,SMTP_FROM
           script: |
             cd /opt/piplex
             git pull origin main
+
+            # ── Write secrets to .env (create or update SMTP block) ──────────
+            touch .env
+            # Remove any existing SMTP_* lines so we don't accumulate duplicates
+            sed -i '/^SMTP_/d' .env
+            # Append current values (empty string if secret not set — disables SMTP)
+            echo "SMTP_HOST=${SMTP_HOST}"   >> .env
+            echo "SMTP_PORT=${SMTP_PORT:-587}" >> .env
+            echo "SMTP_USER=${SMTP_USER}"   >> .env
+            echo "SMTP_PASS=${SMTP_PASS}"   >> .env
+            echo "SMTP_FROM=${SMTP_FROM}"   >> .env
+            chmod 600 .env
 
             # Sync Nginx config from repo and reload
             cp infra/nginx/piplex.conf /etc/nginx/sites-available/piplex

@@ -21,13 +21,17 @@ function GoogleLoginButton({ onSuccess, onError, disabled }) {
 }
 
 export default function LoginPage({ onLogin, onBack }) {
-  const [tab, setTab]           = useState('signin')
-  const [email, setEmail]       = useState('')
-  const [password, setPassword] = useState('')
-  const [name, setName]         = useState('')
-  const [error, setError]       = useState(null)
-  const [loading, setLoading]   = useState(false)
-  const [apiKey, setApiKey]     = useState(null)
+  const [tab, setTab]                       = useState('signin')
+  const [email, setEmail]                   = useState('')
+  const [password, setPassword]             = useState('')
+  const [name, setName]                     = useState('')
+  const [error, setError]                   = useState(null)
+  const [loading, setLoading]               = useState(false)
+  const [apiKey, setApiKey]                 = useState(null)
+  const [needsOtp, setNeedsOtp]             = useState(false)
+  const [pendingEmail, setPendingEmail]     = useState('')
+  const [otp, setOtp]                       = useState('')
+  const [resendCooldown, setResendCooldown] = useState(0)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -54,9 +58,13 @@ export default function LoginPage({ onLogin, onBack }) {
         return
       }
 
+      if (tab === 'signup' && data.needs_verification) {
+        setPendingEmail(req.email)
+        setNeedsOtp(true)
+        return
+      }
       if (tab === 'signup' && data.api_key) {
         setApiKey(data.api_key)
-        // Store login info to use after user acknowledges key
         localStorage.setItem('apd_pending_token', data.token)
         localStorage.setItem('apd_pending_user', JSON.stringify(data.user))
         return
@@ -92,6 +100,100 @@ export default function LoginPage({ onLogin, onBack }) {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleVerifyOtp = async (e) => {
+    e.preventDefault()
+    setError(null)
+    if (otp.length !== 6) { setError('Enter the 6-digit code sent to your email.'); return }
+    setLoading(true)
+    try {
+      const res = await fetch(`${API}/auth/verify-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: pendingEmail, otp }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setError(data.detail || 'Verification failed.'); return }
+      if (data.api_key) {
+        setApiKey(data.api_key)
+        localStorage.setItem('apd_pending_token', data.token)
+        localStorage.setItem('apd_pending_user', JSON.stringify(data.user))
+        setNeedsOtp(false)
+        return
+      }
+      onLogin(data.token, data.user)
+    } catch {
+      setError('Could not reach the server.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0) return
+    try {
+      await fetch(`${API}/auth/resend-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: pendingEmail }),
+      })
+    } catch { /* silent */ }
+    setResendCooldown(60)
+    const iv = setInterval(() => setResendCooldown(c => { if (c <= 1) { clearInterval(iv); return 0 } return c - 1 }), 1000)
+  }
+
+  if (needsOtp) {
+    return (
+      <div className="auth-shell">
+        <div className="auth-glow auth-glow-left" />
+        <div className="auth-glow auth-glow-right" />
+        <nav className="lp-nav">
+          <div className="lp-nav-inner">
+            <div className="lp-logo"><div className="lp-logo-img-wrap"><PiPlexLogo height={36} /></div></div>
+            <button className="lp-btn-ghost" onClick={() => { setNeedsOtp(false); setOtp(''); setError(null) }}>← Back</button>
+          </div>
+        </nav>
+        <div className="auth-center">
+          <div className="auth-card" style={{ maxWidth: 420 }}>
+            <div style={{ fontSize: '2rem', textAlign: 'center' }}>📬</div>
+            <h2 className="auth-title" style={{ textAlign: 'center' }}>Check your email</h2>
+            <p className="auth-sub" style={{ textAlign: 'center' }}>
+              We sent a 6-digit code to <strong style={{ color: '#e2e8f0' }}>{pendingEmail}</strong>
+            </p>
+            <form className="auth-form" onSubmit={handleVerifyOtp}>
+              <div className="auth-field">
+                <label className="auth-label">Verification code</label>
+                <input
+                  className="auth-input"
+                  placeholder="123456"
+                  value={otp}
+                  onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  inputMode="numeric"
+                  autoFocus
+                  style={{ fontFamily: 'monospace', fontSize: '1.4rem', letterSpacing: '0.5em', textAlign: 'center' }}
+                />
+              </div>
+              {error && <p className="auth-error">{error}</p>}
+              <button className="lp-btn-primary auth-submit" type="submit" disabled={loading}>
+                {loading ? <span className="auth-spinner" /> : 'Verify →'}
+              </button>
+            </form>
+            <p style={{ textAlign: 'center', fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '0.75rem' }}>
+              Didn't receive it?{' '}
+              <button
+                className="auth-link"
+                onClick={handleResendOtp}
+                disabled={resendCooldown > 0}
+                style={{ opacity: resendCooldown > 0 ? 0.5 : 1 }}
+              >
+                {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend code'}
+              </button>
+            </p>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (apiKey) {
