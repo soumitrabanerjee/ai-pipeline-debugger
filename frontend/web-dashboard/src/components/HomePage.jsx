@@ -222,30 +222,59 @@ export default function HomePage({ user, onOpenDashboard, onOpenAdmin, onSignOut
             </div>
           </div>
 
-          {/* ── Quick actions ── */}
+          {/* ── Connect pipeline ── */}
           <div className="db-stat-card">
-            <h2 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '1rem' }}>Quick actions</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+            <h2 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '1rem' }}>Connect your pipeline</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+
               <button className="dashboard-button" style={{ justifyContent: 'flex-start' }} onClick={onOpenDashboard}>
                 Open Dashboard →
               </button>
-              {user?.is_admin && (
-                <button className="dashboard-button" style={{ justifyContent: 'flex-start', background: 'var(--accent)' }} onClick={onOpenAdmin}>
-                  Admin Panel →
-                </button>
-              )}
+
+              {/* Airflow snippet */}
               <div style={{ background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', padding: '0.75rem', border: '1px solid var(--border)' }}>
-                <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Airflow webhook URL</div>
-                <code style={{ fontSize: '0.78rem', color: 'var(--accent)', wordBreak: 'break-all' }}>
-                  {WEBHOOK_URL}/airflow
-                </code>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Airflow — on_failure_callback</span>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(`import requests\n\ndef piplex_failure_callback(context):\n    requests.post(\n        "${WEBHOOK_URL}/airflow",\n        headers={"x-api-key": "YOUR_API_KEY"},\n        json={\n            "dag_id": context["dag"].dag_id,\n            "run_id": context["run_id"],\n            "task_id": context["task"].task_id,\n            "exception": str(context.get("exception", "")),\n        }\n    )`)}
+                    style={{ fontSize: '0.68rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '0.1rem 0.3rem' }}
+                  >copy</button>
+                </div>
+                <pre style={{ margin: 0, fontSize: '0.72rem', color: 'var(--accent)', overflowX: 'auto', lineHeight: 1.6, whiteSpace: 'pre' }}>{`import requests
+
+def piplex_failure_callback(context):
+    requests.post(
+        "${WEBHOOK_URL}/airflow",
+        headers={"x-api-key": "YOUR_API_KEY"},
+        json={
+            "dag_id": context["dag"].dag_id,
+            "run_id": context["run_id"],
+            "task_id": context["task"].task_id,
+            "exception": str(context.get("exception", "")),
+        }
+    )`}</pre>
               </div>
+
+              {/* curl / generic snippet */}
               <div style={{ background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', padding: '0.75rem', border: '1px solid var(--border)' }}>
-                <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Generic webhook URL</div>
-                <code style={{ fontSize: '0.78rem', color: 'var(--accent)', wordBreak: 'break-all' }}>
-                  {WEBHOOK_URL}/generic
-                </code>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Generic — curl</span>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(`curl -X POST ${WEBHOOK_URL}/generic \\\n  -H "x-api-key: YOUR_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"pipeline":"my-pipeline","level":"ERROR","message":"Job failed"}'`)}
+                    style={{ fontSize: '0.68rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '0.1rem 0.3rem' }}
+                  >copy</button>
+                </div>
+                <pre style={{ margin: 0, fontSize: '0.72rem', color: 'var(--accent)', overflowX: 'auto', lineHeight: 1.6, whiteSpace: 'pre' }}>{`curl -X POST ${WEBHOOK_URL}/generic \\
+  -H "x-api-key: YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"pipeline":"my-pipeline",
+       "level":"ERROR",
+       "message":"Job failed"}'`}</pre>
               </div>
+
+              <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: 0 }}>
+                Replace <code style={{ color: 'var(--accent)' }}>YOUR_API_KEY</code> with your key from the API Keys section in the Dashboard.
+              </p>
             </div>
           </div>
         </div>
