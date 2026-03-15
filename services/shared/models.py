@@ -78,18 +78,39 @@ class User(Base):
         ),
     )
 
-    id                = Column(Integer, primary_key=True, index=True)
-    email             = Column(String,  unique=True, index=True, nullable=False)
-    name              = Column(String,  nullable=True)
-    password_hash     = Column(String,  nullable=False)
-    paid              = Column(Boolean, nullable=False, default=False, server_default="false")
-    plan              = Column(String,  nullable=True)
-    session_token     = Column(String,  nullable=True, unique=True, index=True)
-    created_at        = Column(String,  nullable=False)
-    is_admin          = Column(Boolean, nullable=False, default=False, server_default="false")
-    otp_code          = Column(String,  nullable=True)
-    otp_expires_at    = Column(String,  nullable=True)
-    is_email_verified = Column(Boolean, nullable=False, default=True, server_default="true")
+    id            = Column(Integer, primary_key=True, index=True)
+    email         = Column(String,  unique=True, index=True, nullable=False)
+    name          = Column(String,  nullable=True)
+    password_hash = Column(String,  nullable=False)
+    paid          = Column(Boolean, nullable=False, default=False, server_default="false")
+    plan          = Column(String,  nullable=True)
+    session_token = Column(String,  nullable=True, unique=True, index=True)
+    created_at    = Column(String,  nullable=False)
+    is_admin      = Column(Boolean, nullable=False, default=False, server_default="false")
+
+
+class PendingRegistration(Base):
+    """
+    Temporary holding area for signups awaiting email OTP verification.
+
+    A row is created when the user submits the signup form. It is deleted
+    (and a real User + ApiKey row created atomically) only after the correct
+    OTP is submitted. If verification never happens the row stays here until
+    the next signup attempt with the same email, at which point a fresh OTP
+    is issued and the old row is replaced.
+
+    No User row is written until verification succeeds — this keeps the
+    users table clean and prevents orphaned / unverified accounts.
+    """
+    __tablename__ = "pending_registrations"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    email          = Column(String,  unique=True, index=True, nullable=False)
+    name           = Column(String,  nullable=True)
+    password_hash  = Column(String,  nullable=False)
+    otp_code       = Column(String,  nullable=False)
+    otp_expires_at = Column(String,  nullable=False)
+    created_at     = Column(String,  nullable=False)
 
 
 class RunbookChunk(Base):

@@ -23,7 +23,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 sys.path.append(PROJECT_ROOT)
 sys.path.append(os.path.join(PROJECT_ROOT, 'services', 'log-processing-layer'))
 
-from services.shared.models import Base, Pipeline, PipelineRun, Error, User, RunbookChunk, ApiKey
+from services.shared.models import Base, Pipeline, PipelineRun, Error, User, RunbookChunk, ApiKey, PendingRegistration
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -367,11 +367,38 @@ async def lifespan(app: FastAPI):
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_keys_workspace ON api_keys(workspace_id)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_api_keys_hash ON api_keys(key_hash)"))
 
-        # ── is_admin / OTP / email verification columns on users ─────────────
+        # ── is_admin column on users ──────────────────────────────────────────
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_code VARCHAR"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS otp_expires_at VARCHAR"))
-        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_email_verified BOOLEAN NOT NULL DEFAULT true"))
+
+        # ── pending_registrations table (pre-verification holding area) ───────
+        # Users are only inserted into `users` after OTP is verified.
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS pending_registrations (
+                id             SERIAL PRIMARY KEY,
+                email          VARCHAR NOT NULL UNIQUE,
+                name           VARCHAR,
+                password_hash  VARCHAR NOT NULL,
+                otp_code       VARCHAR NOT NULL,
+                otp_expires_at VARCHAR NOT NULL,
+                created_at     VARCHAR NOT NULL
+            )
+        """))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_pending_reg_email ON pending_registrations(email)"
+        ))
+
+        # ── Clean up orphaned unverified users from old buggy flow ────────────
+        # Old code wrote User rows before OTP was verified. These are safe to
+        # delete because no API key or pipeline data exists for them yet.
+        conn.execute(text("""
+            DELETE FROM users
+            WHERE is_email_verified = false
+        """))
+
+        # ── Drop OTP columns from users (no longer needed there) ─────────────
+        conn.execute(text("ALTER TABLE users DROP COLUMN IF EXISTS otp_code"))
+        conn.execute(text("ALTER TABLE users DROP COLUMN IF EXISTS otp_expires_at"))
+        conn.execute(text("ALTER TABLE users DROP COLUMN IF EXISTS is_email_verified"))
         admin_emails_raw = os.getenv("ADMIN_EMAILS", "")
         if admin_emails_raw.strip():
             for ae in admin_emails_raw.split(","):
@@ -472,51 +499,48 @@ def _auto_create_api_key(user: User, db: Session) -> str:
 @app.post("/auth/register", response_model=AuthResponse, status_code=201)
 @limiter.limit("10/minute")
 def register(request: Request, req: RegisterRequest, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.email == req.email).first()
-    if existing:
-        if not existing.is_email_verified:
-            # Refresh OTP and re-send so user isn't stuck
-            otp            = _generate_otp()
-            otp_expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
-            existing.otp_code       = otp
-            existing.otp_expires_at = otp_expires_at
-            # Update password in case they mistyped it first time
-            existing.password_hash  = hash_password(req.password)
-            db.commit()
-            send_email(existing.email, "Your PiPlex verification code", _otp_email_html(existing.name or "", otp))
-            return {"token": "", "user": _user_out(existing), "api_key": None, "needs_verification": True}
-        raise HTTPException(status_code=409, detail="An account with this email already exists")
+    # Reject if a verified account already exists for this email
+    if db.query(User).filter(User.email == req.email).first():
+        raise HTTPException(status_code=409, detail="An account with this email already exists.")
 
     if SMTP_ENABLED:
         otp            = _generate_otp()
         otp_expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
-        user = User(
-            email             = req.email,
-            name              = req.name,
-            password_hash     = hash_password(req.password),
-            paid              = False,
-            session_token     = None,          # set after OTP verified
-            created_at        = datetime.now(timezone.utc).isoformat(),
-            otp_code          = otp,
-            otp_expires_at    = otp_expires_at,
-            is_email_verified = False,
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        send_email(req.email, "Your PiPlex verification code", _otp_email_html(req.name or "", otp))
-        return {"token": "", "user": _user_out(user), "api_key": None, "needs_verification": True}
 
-    # SMTP not configured — skip verification, activate immediately
+        # Upsert into pending_registrations — no User row written yet
+        pending = db.query(PendingRegistration).filter(PendingRegistration.email == req.email).first()
+        if pending:
+            # Existing pending entry: refresh OTP + update password (user may have retyped)
+            pending.name           = req.name
+            pending.password_hash  = hash_password(req.password)
+            pending.otp_code       = otp
+            pending.otp_expires_at = otp_expires_at
+        else:
+            pending = PendingRegistration(
+                email          = req.email,
+                name           = req.name,
+                password_hash  = hash_password(req.password),
+                otp_code       = otp,
+                otp_expires_at = otp_expires_at,
+                created_at     = datetime.now(timezone.utc).isoformat(),
+            )
+            db.add(pending)
+        db.commit()
+
+        send_email(req.email, "Your PiPlex verification code", _otp_email_html(req.name or "", otp))
+        # Return a placeholder user shape — no real User row exists yet
+        placeholder = {"email": req.email, "name": req.name, "paid": False, "plan": None, "is_admin": False}
+        return {"token": "", "user": placeholder, "api_key": None, "needs_verification": True}
+
+    # ── SMTP not configured: skip OTP, create user + API key immediately ──────
     token = secrets.token_urlsafe(32)
     user  = User(
-        email             = req.email,
-        name              = req.name,
-        password_hash     = hash_password(req.password),
-        paid              = False,
-        session_token     = token,
-        created_at        = datetime.now(timezone.utc).isoformat(),
-        is_email_verified = True,
+        email         = req.email,
+        name          = req.name,
+        password_hash = hash_password(req.password),
+        paid          = False,
+        session_token = token,
+        created_at    = datetime.now(timezone.utc).isoformat(),
     )
     db.add(user)
     db.commit()
@@ -528,46 +552,64 @@ def register(request: Request, req: RegisterRequest, db: Session = Depends(get_d
 @app.post("/auth/verify-otp", response_model=AuthResponse)
 @limiter.limit("10/minute")
 def verify_otp(request: Request, req: VerifyOtpRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == req.email).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="No account found with that email.")
-    if user.is_email_verified:
-        raise HTTPException(status_code=400, detail="Email already verified. Please sign in.")
-    if not user.otp_code or user.otp_code != req.otp:
-        raise HTTPException(status_code=400, detail="Invalid OTP code. Please try again.")
-    if user.otp_expires_at:
-        try:
-            expires = datetime.fromisoformat(user.otp_expires_at)
-            if expires < datetime.now(timezone.utc):
-                raise HTTPException(status_code=400, detail="OTP has expired. Please sign up again.")
-        except ValueError:
-            pass
+    pending = db.query(PendingRegistration).filter(PendingRegistration.email == req.email).first()
+    if not pending:
+        raise HTTPException(status_code=404, detail="No pending signup found. Please sign up first.")
 
+    if pending.otp_code != req.otp:
+        raise HTTPException(status_code=400, detail="Invalid OTP code. Please try again.")
+
+    try:
+        expires = datetime.fromisoformat(pending.otp_expires_at)
+        if expires < datetime.now(timezone.utc):
+            db.delete(pending)
+            db.commit()
+            raise HTTPException(status_code=400, detail="OTP has expired. Please sign up again.")
+    except ValueError:
+        pass
+
+    # ── Atomically: create User + ApiKey, delete pending row ─────────────────
     token = secrets.token_urlsafe(32)
-    user.is_email_verified = True
-    user.otp_code          = None
-    user.otp_expires_at    = None
-    user.session_token     = token
-    db.commit()
+    user  = User(
+        email         = pending.email,
+        name          = pending.name,
+        password_hash = pending.password_hash,
+        paid          = False,
+        session_token = token,
+        created_at    = datetime.now(timezone.utc).isoformat(),
+    )
+    db.add(user)
+    db.flush()  # assigns user.id without committing
+
+    full_key, prefix, key_hash = generate_api_key()
+    db.add(ApiKey(
+        workspace_id = str(user.id),
+        name         = "default",
+        key_prefix   = prefix,
+        key_hash     = key_hash,
+        created_at   = datetime.now(timezone.utc).isoformat(),
+        is_active    = True,
+    ))
+
+    db.delete(pending)   # remove from staging area
+    db.commit()          # single commit — all or nothing
     db.refresh(user)
 
-    raw_key = _auto_create_api_key(user, db)
-    send_email(user.email, "Your PiPlex API Key", _api_key_email_html(user.name or "", raw_key))
-    return {"token": token, "user": _user_out(user), "api_key": raw_key}
+    send_email(user.email, "Your PiPlex API Key", _api_key_email_html(user.name or "", full_key))
+    return {"token": token, "user": _user_out(user), "api_key": full_key}
 
 
 @app.post("/auth/resend-otp", status_code=204)
 @limiter.limit("5/minute")
 def resend_otp(request: Request, req: ResendOtpRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == req.email).first()
-    if not user or user.is_email_verified:
+    pending = db.query(PendingRegistration).filter(PendingRegistration.email == req.email).first()
+    if not pending:
         return  # silent — don't reveal whether email exists
-    otp            = _generate_otp()
-    otp_expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
-    user.otp_code       = otp
-    user.otp_expires_at = otp_expires_at
+    otp = _generate_otp()
+    pending.otp_code       = otp
+    pending.otp_expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
     db.commit()
-    send_email(user.email, "Your PiPlex verification code", _otp_email_html(user.name or "", otp))
+    send_email(pending.email, "Your PiPlex verification code", _otp_email_html(pending.name or "", otp))
 
 
 @app.post("/auth/apply-promo", response_model=UserOut)
