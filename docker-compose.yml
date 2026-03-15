@@ -41,6 +41,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://debugger:debugger@postgres:5432/pipeline_debugger
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:5173,https://piplex.in,https://www.piplex.in}
+      - ADMIN_EMAILS=${ADMIN_EMAILS:-}
     depends_on:
       postgres:
         condition: service_healthy
