@@ -216,6 +216,11 @@ class ResendOtpRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # pgvector extension must exist before create_all because RunbookChunk
+    # has a VECTOR column — SQLAlchemy will fail to create the table otherwise.
+    with engine.connect() as _pre:
+        _pre.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        _pre.commit()
     Base.metadata.create_all(bind=engine)
     with engine.connect() as conn:
         # ── Column additions (safe: IF NOT EXISTS) ────────────────────────────
@@ -447,7 +452,7 @@ app = FastAPI(title="AI Pipeline Debugger API", version="0.2.0", lifespan=lifesp
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,https://piplex.in,https://www.piplex.in")
 _allowed_origins = [o.strip() for o in _raw_origins.split(",")]
 
 app.add_middleware(

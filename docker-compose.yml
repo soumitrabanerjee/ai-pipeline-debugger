@@ -40,7 +40,7 @@ services:
       - "8001:8001"
     environment:
       - DATABASE_URL=postgresql://debugger:debugger@postgres:5432/pipeline_debugger
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:5173,https://piplex.in,https://www.piplex.in}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,https://piplex.in,https://www.piplex.in}
       - ADMIN_EMAILS=${ADMIN_EMAILS:-smtro0000@gmail.com}
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}
