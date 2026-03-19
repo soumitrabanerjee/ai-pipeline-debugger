@@ -1152,6 +1152,26 @@ def admin_grant_calls(
     return {"user_id": u.id, "ai_calls_used": u.ai_calls_used, "ai_calls_limit": u.ai_calls_limit, "last_grant_at": u.last_grant_at}
 
 
+@app.post("/admin/users/{user_id}/reset-quota")
+@limiter.limit("60/minute")
+def admin_reset_quota(
+    request: Request,
+    user_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_admin_user),
+):
+    """Reset a user's AI quota: used → 0, limit → 1000, cooldown cleared."""
+    u = db.query(User).filter(User.id == user_id).first()
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+    u.ai_calls_used  = 0
+    u.ai_calls_limit = 1000
+    u.last_grant_at  = None
+    db.commit()
+    db.refresh(u)
+    return {"user_id": u.id, "ai_calls_used": u.ai_calls_used, "ai_calls_limit": u.ai_calls_limit}
+
+
 @app.delete("/runbooks/{source_file}", status_code=204)
 @limiter.limit("20/minute")
 def delete_runbook(

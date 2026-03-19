@@ -9,6 +9,7 @@ export default function AdminDashboard({ user, onSignOut, theme, toggleTheme, on
   const [pwInput, setPwInput]   = useState('')
   const [pwStatus, setPwStatus] = useState(null)   // null | 'saving' | 'ok' | 'error'
   const [grantStatus, setGrantStatus] = useState({})  // { [userId]: 'loading' | 'ok' | 'error' }
+  const [resetStatus, setResetStatus] = useState({})  // { [userId]: 'loading' | 'ok' | 'error' }
 
   const loadUsers = () => {
     const token = localStorage.getItem('apd_token')
@@ -50,6 +51,27 @@ export default function AdminDashboard({ user, onSignOut, theme, toggleTheme, on
     if (!lastGrantAt) return false
     const elapsed = (Date.now() - new Date(lastGrantAt).getTime()) / 1000
     return elapsed < 86400
+  }
+
+  const handleResetQuota = async (userId) => {
+    if (!window.confirm('Reset this user\'s quota to 1000 calls and clear the grant cooldown?')) return
+    setResetStatus(s => ({ ...s, [userId]: 'loading' }))
+    const token = localStorage.getItem('apd_token')
+    try {
+      const res = await fetch(`${API_URL}/admin/users/${userId}/reset-quota`, {
+        method: 'POST',
+        headers: { 'x-session-token': token },
+      })
+      if (res.ok) {
+        setResetStatus(s => ({ ...s, [userId]: 'ok' }))
+        loadUsers()
+        setTimeout(() => setResetStatus(s => ({ ...s, [userId]: null })), 3000)
+      } else {
+        setResetStatus(s => ({ ...s, [userId]: 'error' }))
+      }
+    } catch {
+      setResetStatus(s => ({ ...s, [userId]: 'error' }))
+    }
   }
 
   const cooldownLabel = (lastGrantAt) => {
@@ -210,6 +232,22 @@ export default function AdminDashboard({ user, onSignOut, theme, toggleTheme, on
                       <span style={{ color: 'var(--text-muted)' }}> / {u.ai_calls_limit ?? 100}</span>
                     </td>
                     <td style={{ padding: '0.6rem 0.75rem' }}>
+                      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                      <button
+                        className="lp-btn-ghost"
+                        style={{ fontSize: '0.72rem', padding: '0.25rem 0.6rem', whiteSpace: 'nowrap',
+                                 color: 'var(--failed-text)',
+                                 opacity: resetStatus[u.id] === 'loading' ? 0.55 : 1,
+                                 cursor: resetStatus[u.id] === 'loading' ? 'not-allowed' : 'pointer' }}
+                        disabled={resetStatus[u.id] === 'loading'}
+                        onClick={() => handleResetQuota(u.id)}
+                        title="Reset quota to 1000 calls and clear grant cooldown"
+                      >
+                        {resetStatus[u.id] === 'loading' ? '…' :
+                         resetStatus[u.id] === 'ok'      ? '✓ Reset' :
+                         resetStatus[u.id] === 'error'   ? '✗ Error' :
+                         '↺ Reset'}
+                      </button>
                       {(() => {
                         const onCooldown = inCooldown(u.last_grant_at)
                         const st = grantStatus[u.id]
@@ -234,6 +272,7 @@ export default function AdminDashboard({ user, onSignOut, theme, toggleTheme, on
                           </button>
                         )
                       })()}
+                      </div>
                     </td>
                   </tr>
                 ))}
