@@ -30,6 +30,8 @@ _EXCEPTION_CATALOGUE: list[tuple[re.Pattern, str, str]] = [
     (re.compile(r"PythonException.*ValueError|ValueError"),                                            "DATA_TYPE",        "high"),
     (re.compile(r"PythonException.*KeyError|KeyError"),                                                "MISSING_KEY",      "high"),
     (re.compile(r"PythonException.*FileNotFoundError|FileNotFoundError"),                              "MISSING_FILE",     "high"),
+    (re.compile(r"OperationalError|psycopg2\.OperationalError|connection refused|ConnectionTimeout"),   "DB_CONNECTION",    "high"),
+    (re.compile(r"DatabaseError|InterfaceError|ProgrammingError|IntegrityError"),                      "DB_ERROR",         "high"),
     (re.compile(r"PythonException.*ConnectionError|ConnectionRefusedError|socket\.timeout"),           "NETWORK",          "high"),
     (re.compile(r"AnalysisException"),                                                                 "SCHEMA_MISMATCH",  "high"),
     (re.compile(r"SparkException.*stage failure|ExecutorLostFailure|FetchFailed"),                    "EXECUTOR_FAILURE",  "high"),
