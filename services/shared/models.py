@@ -89,6 +89,7 @@ class User(Base):
     is_admin      = Column(Boolean, nullable=False, default=False, server_default="false")
     ai_calls_used  = Column(Integer, nullable=False, default=0,   server_default="0")
     ai_calls_limit = Column(Integer, nullable=False, default=100, server_default="100")
+    last_grant_at  = Column(String,  nullable=True)   # ISO-8601; set on each admin grant
 
 
 class PendingRegistration(Base):

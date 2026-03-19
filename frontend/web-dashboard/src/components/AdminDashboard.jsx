@@ -31,16 +31,33 @@ export default function AdminDashboard({ user, onSignOut, theme, toggleTheme, on
         method: 'POST',
         headers: { 'x-session-token': token },
       })
+      const data = await res.json()
       if (res.ok) {
         setGrantStatus(s => ({ ...s, [userId]: 'ok' }))
         loadUsers()
         setTimeout(() => setGrantStatus(s => ({ ...s, [userId]: null })), 3000)
       } else {
-        setGrantStatus(s => ({ ...s, [userId]: 'error' }))
+        // Show the server's cooldown message
+        setGrantStatus(s => ({ ...s, [userId]: data.detail || 'error' }))
       }
     } catch {
       setGrantStatus(s => ({ ...s, [userId]: 'error' }))
     }
+  }
+
+  // Returns true if last_grant_at is within the last 24 hours
+  const inCooldown = (lastGrantAt) => {
+    if (!lastGrantAt) return false
+    const elapsed = (Date.now() - new Date(lastGrantAt).getTime()) / 1000
+    return elapsed < 86400
+  }
+
+  const cooldownLabel = (lastGrantAt) => {
+    const elapsed = (Date.now() - new Date(lastGrantAt).getTime()) / 1000
+    const remaining = 86400 - elapsed
+    const h = Math.floor(remaining / 3600)
+    const m = Math.floor((remaining % 3600) / 60)
+    return `Wait ${h}h ${m}m`
   }
 
   useEffect(() => { loadUsers() }, [])
@@ -193,18 +210,30 @@ export default function AdminDashboard({ user, onSignOut, theme, toggleTheme, on
                       <span style={{ color: 'var(--text-muted)' }}> / {u.ai_calls_limit ?? 100}</span>
                     </td>
                     <td style={{ padding: '0.6rem 0.75rem' }}>
-                      <button
-                        className="lp-btn-primary"
-                        style={{ fontSize: '0.72rem', padding: '0.25rem 0.6rem', whiteSpace: 'nowrap' }}
-                        disabled={grantStatus[u.id] === 'loading'}
-                        onClick={() => handleGrantCalls(u.id)}
-                        title="Grant 1000 more AI calls"
-                      >
-                        {grantStatus[u.id] === 'loading' ? '…' :
-                         grantStatus[u.id] === 'ok'      ? '✓ Granted' :
-                         grantStatus[u.id] === 'error'   ? '✗ Error' :
-                         '+ 1000 calls'}
-                      </button>
+                      {(() => {
+                        const onCooldown = inCooldown(u.last_grant_at)
+                        const st = grantStatus[u.id]
+                        const disabled = st === 'loading' || onCooldown
+                        const label = st === 'loading'  ? '…'
+                                    : st === 'ok'       ? '✓ Granted'
+                                    : onCooldown        ? cooldownLabel(u.last_grant_at)
+                                    : '+ 1000 calls'
+                        const title = onCooldown
+                          ? `Already granted — ${cooldownLabel(u.last_grant_at)} before next grant`
+                          : 'Grant 1000 more AI calls'
+                        return (
+                          <button
+                            className={onCooldown ? 'lp-btn-ghost' : 'lp-btn-primary'}
+                            style={{ fontSize: '0.72rem', padding: '0.25rem 0.6rem', whiteSpace: 'nowrap',
+                                     opacity: disabled ? 0.55 : 1, cursor: disabled ? 'not-allowed' : 'pointer' }}
+                            disabled={disabled}
+                            onClick={() => !disabled && handleGrantCalls(u.id)}
+                            title={title}
+                          >
+                            {label}
+                          </button>
+                        )
+                      })()}
                     </td>
                   </tr>
                 ))}

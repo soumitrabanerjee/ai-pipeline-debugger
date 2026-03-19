@@ -236,6 +236,7 @@ async def lifespan(app: FastAPI):
         conn.execute(text("ALTER TABLE errors         ADD COLUMN IF NOT EXISTS workspace_id VARCHAR NOT NULL DEFAULT 'default'"))
         conn.execute(text("ALTER TABLE users          ADD COLUMN IF NOT EXISTS ai_calls_used  INTEGER NOT NULL DEFAULT 0"))
         conn.execute(text("ALTER TABLE users          ADD COLUMN IF NOT EXISTS ai_calls_limit INTEGER NOT NULL DEFAULT 100"))
+        conn.execute(text("ALTER TABLE users          ADD COLUMN IF NOT EXISTS last_grant_at  VARCHAR"))
 
         # ── NOT NULL enforcement (fill nulls first, then set constraint) ──────
         conn.execute(text("UPDATE pipelines      SET status   = 'Failed'   WHERE status   IS NULL"))
@@ -1107,6 +1108,7 @@ def admin_users(request: Request, db: Session = Depends(get_db), _: User = Depen
             "api_key_prefix":  api_key.key_prefix if api_key else None,
             "ai_calls_used":   u.ai_calls_used,
             "ai_calls_limit":  u.ai_calls_limit,
+            "last_grant_at":   u.last_grant_at,
         })
     return result
 
@@ -1119,14 +1121,35 @@ def admin_grant_calls(
     db: Session = Depends(get_db),
     _: User = Depends(get_admin_user),
 ):
-    """Grant the user 1000 additional AI calls by raising their limit."""
+    """Grant the user 1000 additional AI calls. Blocked for 24 h after each grant."""
     u = db.query(User).filter(User.id == user_id).first()
     if not u:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Enforce 24-hour cooldown between grants for the same user
+    if u.last_grant_at:
+        try:
+            last = datetime.fromisoformat(u.last_grant_at)
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=timezone.utc)
+            elapsed = datetime.now(timezone.utc) - last
+            if elapsed.total_seconds() < 86400:
+                remaining_h = int((86400 - elapsed.total_seconds()) // 3600)
+                remaining_m = int((86400 - elapsed.total_seconds()) % 3600 // 60)
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Already granted calls to this user. Try again in {remaining_h}h {remaining_m}m."
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            pass  # Malformed timestamp — allow the grant
+
     u.ai_calls_limit = u.ai_calls_limit + 1000
+    u.last_grant_at  = datetime.now(timezone.utc).isoformat()
     db.commit()
     db.refresh(u)
-    return {"user_id": u.id, "ai_calls_used": u.ai_calls_used, "ai_calls_limit": u.ai_calls_limit}
+    return {"user_id": u.id, "ai_calls_used": u.ai_calls_used, "ai_calls_limit": u.ai_calls_limit, "last_grant_at": u.last_grant_at}
 
 
 @app.delete("/runbooks/{source_file}", status_code=204)
