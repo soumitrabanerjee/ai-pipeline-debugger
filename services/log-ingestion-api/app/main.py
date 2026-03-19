@@ -36,7 +36,7 @@ redis_client = redis_lib.Redis.from_url(REDIS_URL, decode_responses=True)
 
 class LogEvent(BaseModel):
     source: str
-    workspace_id: str
+    workspace_id: str | None = None   # ignored by /ingest — workspace comes from API key
     job_id: str
     run_id: str
     task_id: str | None = None
