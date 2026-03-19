@@ -104,7 +104,7 @@ def clean_db():
         pass
 
 
-def _register(email: str = "user@example.com", password: str = "pass123") -> dict:
+def _register(email: str = "user@example.com", password: str = "pass1234") -> dict:
     """Register a user and return the auth response dict."""
     resp = api_client.post(
         "/auth/register",
