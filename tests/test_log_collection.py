@@ -20,7 +20,14 @@ sys.path.insert(0, _LAYER)
 
 from log_parser import parse_log_line, build_ingest_payload, ParsedLine
 from agent import LogDirectoryHandler, send_to_ingest, scan_existing, _FileTailer
-from webhook_collector import app as webhook_app
+import webhook_collector
+from webhook_collector import app as webhook_app, _validate_api_key
+
+# Bypass DB validation in unit tests — API key auth is covered by test_api_keys.py
+def _mock_validate_api_key():
+    return "dpd_test_key"
+
+webhook_app.dependency_overrides[_validate_api_key] = _mock_validate_api_key
 
 webhook_client = TestClient(webhook_app)
 _API_KEY_HDR = {"x-api-key": "dpd_test_key"}
