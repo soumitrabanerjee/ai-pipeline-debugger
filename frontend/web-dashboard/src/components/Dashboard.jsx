@@ -6,7 +6,8 @@ import PiPlexLogo from './PiPlexLogo'
 import { API_URL } from '../config'
 export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme, onOpenAdmin }) {
   const [query, setQuery]                       = useState('')
-  const [data, setData]                         = useState({ pipelines: [], errors: [] })
+  const [data, setData]                         = useState({ pipelines: [], errors: [], aiQuota: null })
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false)
   const [loading, setLoading]                   = useState(true)
   const [error, setError]                       = useState(null)
   const [showCreateForm, setShowCreateForm]     = useState(false)
@@ -119,6 +120,9 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme,
   }, [query, data, errorSort])
 
   const failureCount = data.pipelines.filter(p => p.status === 'Failed').length
+  const quota        = data.aiQuota   // { used, limit } or null
+  const quotaPct     = quota ? Math.min(100, Math.round((quota.used / quota.limit) * 100)) : 0
+  const quotaExceeded = quota && quota.used >= quota.limit
 
   if (loading && !data.pipelines.length) {
     return (
@@ -254,6 +258,43 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme,
         </div>
       )}
 
+      {/* ── AI Upgrade modal ── */}
+      {showUpgradeModal && (
+        <div className="db-modal-overlay" onClick={() => setShowUpgradeModal(false)}>
+          <div className="db-modal" style={{ maxWidth: '480px' }} onClick={e => e.stopPropagation()}>
+            <div className="db-modal-header">
+              <h2 className="db-modal-title">AI Usage Limit Reached</h2>
+              <button className="db-modal-close" onClick={() => setShowUpgradeModal(false)}>✕</button>
+            </div>
+            <div className="db-modal-body" style={{ padding: '1.5rem' }}>
+              <p style={{ color: 'var(--text-muted)', marginBottom: '1.25rem', lineHeight: 1.6 }}>
+                You've used <strong style={{ color: 'var(--text)' }}>{quota?.used ?? 0} / {quota?.limit ?? 100}</strong> AI analysis calls.
+                To unlock unlimited access, complete a one-time UPI payment of <strong style={{ color: 'var(--text)' }}>₹1999</strong>.
+              </p>
+              <div style={{ background: 'var(--accent-subtle)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '10px', padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem' }}>UPI ID</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <code style={{ flex: 1, fontSize: '0.9rem', fontWeight: 600, color: 'var(--accent)', background: 'var(--bg-input)', padding: '0.5rem 0.75rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+                    smtro0000@okhdfcbank
+                  </code>
+                  <button
+                    className="lp-btn-ghost"
+                    style={{ fontSize: '0.78rem', padding: '0.4rem 0.9rem', whiteSpace: 'nowrap' }}
+                    onClick={() => navigator.clipboard.writeText('smtro0000@okhdfcbank')}
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                After payment, reply to your welcome email or contact us with the transaction ID and your account email.
+                Access will be upgraded within 24 hours.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header className="dashboard-header">
         <div className="header-inner">
           <div className="header-brand">
@@ -302,6 +343,17 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme,
           <CreatePipelineForm onPipelineCreated={() => { setShowCreateForm(false); fetchData(false) }} />
         )}
 
+        {quotaExceeded && (
+          <div style={{ background: 'var(--failed-bg)', border: '1px solid var(--failed-border)', borderRadius: '10px', padding: '0.75rem 1.25rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+            <span style={{ color: 'var(--failed-text)', fontSize: '0.85rem', fontWeight: 500 }}>
+              ⚠ You've hit your AI analysis limit (100 calls). New errors won't be analysed by AI.
+            </span>
+            <button className="lp-btn-primary" style={{ fontSize: '0.78rem', padding: '0.4rem 0.9rem', whiteSpace: 'nowrap' }} onClick={() => setShowUpgradeModal(true)}>
+              Upgrade — ₹1999
+            </button>
+          </div>
+        )}
+
         <div className="db-stats-grid">
           {[
             { label: 'Total Pipelines', value: data.pipelines.length, sub: 'Across all workspaces' },
@@ -314,6 +366,23 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme,
               <p className="db-stat-sub">{s.sub}</p>
             </div>
           ))}
+          {quota && (
+            <div
+              className="db-stat-card"
+              style={{ cursor: 'pointer' }}
+              onClick={() => setShowUpgradeModal(true)}
+              title="Click to upgrade"
+            >
+              <p className="db-stat-label">AI Calls</p>
+              <p className="db-stat-value" style={{ color: quotaExceeded ? 'var(--failed-text)' : 'var(--text)' }}>
+                {quota.used} <span style={{ fontSize: '0.85rem', fontWeight: 400, color: 'var(--text-muted)' }}>/ {quota.limit}</span>
+              </p>
+              <div style={{ width: '100%', height: '4px', background: 'var(--border)', borderRadius: '4px', overflow: 'hidden', marginTop: '0.5rem' }}>
+                <div style={{ width: `${quotaPct}%`, height: '100%', background: quotaExceeded ? 'var(--failed-text)' : 'var(--accent)', borderRadius: '4px', transition: 'width 0.3s' }} />
+              </div>
+              <p className="db-stat-sub" style={{ marginTop: '0.25rem' }}>{quotaExceeded ? 'Limit reached — upgrade' : `${quota.limit - quota.used} remaining`}</p>
+            </div>
+          )}
         </div>
 
         <section className="db-section">

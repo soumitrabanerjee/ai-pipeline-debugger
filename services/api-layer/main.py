@@ -154,9 +154,14 @@ class RunItem(BaseModel):
     status: str
     createdAt: str
 
+class AiQuota(BaseModel):
+    used:  int
+    limit: int
+
 class DashboardData(BaseModel):
     pipelines: List[PipelineStatus]
     errors: List[ErrorItem]
+    aiQuota: AiQuota
 
 class ApiKeyCreate(BaseModel):
     name: str   # friendly label, e.g. "airflow-prod"
@@ -229,6 +234,7 @@ async def lifespan(app: FastAPI):
         conn.execute(text("ALTER TABLE pipelines      ADD COLUMN IF NOT EXISTS workspace_id VARCHAR NOT NULL DEFAULT 'default'"))
         conn.execute(text("ALTER TABLE pipeline_runs  ADD COLUMN IF NOT EXISTS workspace_id VARCHAR NOT NULL DEFAULT 'default'"))
         conn.execute(text("ALTER TABLE errors         ADD COLUMN IF NOT EXISTS workspace_id VARCHAR NOT NULL DEFAULT 'default'"))
+        conn.execute(text("ALTER TABLE users          ADD COLUMN IF NOT EXISTS ai_calls_used INTEGER NOT NULL DEFAULT 0"))
 
         # ── NOT NULL enforcement (fill nulls first, then set constraint) ──────
         conn.execute(text("UPDATE pipelines      SET status   = 'Failed'   WHERE status   IS NULL"))
@@ -767,9 +773,11 @@ def get_dashboard_data(
         .order_by(Error.detected_at.desc())
         .all()
     )
+    AI_QUOTA_LIMIT = 100
     return {
         "pipelines": [{"name": p.name, "status": p.status, "lastRun": p.last_run} for p in pipelines],
         "errors":    [{"pipeline": e.pipeline_name, "error": e.error_type, "rootCause": e.root_cause, "fix": e.fix, "detectedAt": e.detected_at, "rawLog": e.raw_log} for e in errors],
+        "aiQuota":   {"used": current_user.ai_calls_used, "limit": AI_QUOTA_LIMIT},
     }
 
 @app.get("/pipelines/{pipeline_name}/errors", response_model=List[ErrorItem])

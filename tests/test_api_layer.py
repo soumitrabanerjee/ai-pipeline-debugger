@@ -58,6 +58,7 @@ class _FakeUser:
     created_at = "2026-01-01"
     is_admin = False
     password_hash = "x"
+    ai_calls_used = 0
 
 app.dependency_overrides[get_db] = override_get_db
 app.dependency_overrides[api_layer_main.get_current_user] = lambda: _FakeUser()

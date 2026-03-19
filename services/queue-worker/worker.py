@@ -28,9 +28,9 @@ sys.path.append(PROJECT_ROOT)
 sys.path.append(os.path.join(PROJECT_ROOT, 'services', 'log-processing-layer'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'services', 'root-cause-engine'))
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from services.shared.models import Error
+from services.shared.models import Error, User
 from services.shared.scrubber import scrub
 from services.alerting.alerter import send_alerts
 from parser import extract_error
@@ -195,7 +195,41 @@ def process_event(event_id: str, fields: dict):
             print(f"[worker] No similar incidents found — using standard prompt")
 
     # ── 4. AI analysis (RAG-augmented when context available) ─────────────────
-    ai_result = analyze_with_ai(message, pipeline_context, similar_incidents, runbook_sections)
+    # Check per-user AI quota before calling Claude
+    AI_QUOTA_LIMIT = 100
+    quota_db = SessionLocal()
+    user_row = None
+    quota_exceeded = False
+    try:
+        user_row = quota_db.query(User).filter(User.id == int(workspace_id)).first()
+        if user_row and user_row.ai_calls_used >= AI_QUOTA_LIMIT:
+            quota_exceeded = True
+            print(f"[worker] AI quota exceeded for workspace={workspace_id} ({user_row.ai_calls_used}/{AI_QUOTA_LIMIT})")
+    except Exception as e:
+        print(f"[worker] Quota check failed (will proceed without enforcement): {e}")
+    finally:
+        quota_db.close()
+
+    if quota_exceeded:
+        ai_result = {
+            "root_cause":    "AI quota exceeded (100 calls/user limit reached).",
+            "suggested_fix": "Upgrade your plan to continue AI-powered analysis.",
+        }
+    else:
+        ai_result = analyze_with_ai(message, pipeline_context, similar_incidents, runbook_sections)
+        # Increment ai_calls_used on successful (non-fallback) analysis
+        if ai_result.get("root_cause") != "Analysis Failed (AI Service Unavailable)":
+            inc_db = SessionLocal()
+            try:
+                inc_db.execute(
+                    text("UPDATE users SET ai_calls_used = ai_calls_used + 1 WHERE id = :uid"),
+                    {"uid": int(workspace_id)},
+                )
+                inc_db.commit()
+            except Exception as e:
+                print(f"[worker] Failed to increment ai_calls_used: {e}")
+            finally:
+                inc_db.close()
 
     # ── 4b. Root Cause Engine — rank hypotheses, pick the best one ────────────
     hypotheses = build_hypotheses(ai_result, parsed)

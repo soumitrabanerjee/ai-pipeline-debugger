@@ -13,6 +13,17 @@ It turns raw logs into actionable insights through a staged architecture:
 
 ---
 
+## Documentation
+
+| Document | Description |
+|---|---|
+| [Architecture](docs/architecture.md) | Full system architecture and design decisions |
+| [Progress Log](docs/PROGRESS.md) | Completed features and implementation notes |
+| [Startup Analysis](docs/startup-analysis.md) | Launch readiness, roadmap, and product-market fit |
+| [Services →](docs/services/) | Per-service documentation |
+
+---
+
 ## Architecture Overview
 
 ```text
