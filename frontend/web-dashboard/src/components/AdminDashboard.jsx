@@ -3,13 +3,14 @@ import PiPlexLogo from './PiPlexLogo'
 import { API_URL } from '../config'
 
 export default function AdminDashboard({ user, onSignOut, theme, toggleTheme, onBack }) {
-  const [stats, setStats] = useState(null)
-  const [users, setUsers] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [stats, setStats]       = useState(null)
+  const [users, setUsers]       = useState([])
+  const [loading, setLoading]   = useState(true)
   const [pwInput, setPwInput]   = useState('')
   const [pwStatus, setPwStatus] = useState(null)   // null | 'saving' | 'ok' | 'error'
+  const [grantStatus, setGrantStatus] = useState({})  // { [userId]: 'loading' | 'ok' | 'error' }
 
-  useEffect(() => {
+  const loadUsers = () => {
     const token = localStorage.getItem('apd_token')
     const headers = { 'x-session-token': token }
     Promise.all([
@@ -20,7 +21,29 @@ export default function AdminDashboard({ user, onSignOut, theme, toggleTheme, on
       setUsers(u)
       setLoading(false)
     }).catch(() => setLoading(false))
-  }, [])
+  }
+
+  const handleGrantCalls = async (userId) => {
+    setGrantStatus(s => ({ ...s, [userId]: 'loading' }))
+    const token = localStorage.getItem('apd_token')
+    try {
+      const res = await fetch(`${API_URL}/admin/users/${userId}/grant-calls`, {
+        method: 'POST',
+        headers: { 'x-session-token': token },
+      })
+      if (res.ok) {
+        setGrantStatus(s => ({ ...s, [userId]: 'ok' }))
+        loadUsers()
+        setTimeout(() => setGrantStatus(s => ({ ...s, [userId]: null })), 3000)
+      } else {
+        setGrantStatus(s => ({ ...s, [userId]: 'error' }))
+      }
+    } catch {
+      setGrantStatus(s => ({ ...s, [userId]: 'error' }))
+    }
+  }
+
+  useEffect(() => { loadUsers() }, [])
 
   if (loading) return (
     <div className="db-shell">
@@ -131,7 +154,7 @@ export default function AdminDashboard({ user, onSignOut, theme, toggleTheme, on
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-muted)', textAlign: 'left' }}>
-                  {['Email', 'Name', 'Plan', 'API Key', 'Pipelines', 'Claude Calls', 'Runs', 'Joined'].map(h => (
+                  {['Email', 'Name', 'Plan', 'API Key', 'Pipelines', 'Claude Calls', 'Runs', 'Joined', 'AI Quota', ''].map(h => (
                     <th key={h} style={{ padding: '0.5rem 0.75rem', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -162,6 +185,26 @@ export default function AdminDashboard({ user, onSignOut, theme, toggleTheme, on
                     <td style={{ padding: '0.6rem 0.75rem', textAlign: 'center' }}>{u.run_count}</td>
                     <td style={{ padding: '0.6rem 0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                       {u.created_at?.slice(0, 10) || '—'}
+                    </td>
+                    <td style={{ padding: '0.6rem 0.75rem', whiteSpace: 'nowrap' }}>
+                      <span style={{ color: u.ai_calls_used >= u.ai_calls_limit ? 'var(--failed-text)' : 'var(--text)' }}>
+                        {u.ai_calls_used ?? 0}
+                      </span>
+                      <span style={{ color: 'var(--text-muted)' }}> / {u.ai_calls_limit ?? 100}</span>
+                    </td>
+                    <td style={{ padding: '0.6rem 0.75rem' }}>
+                      <button
+                        className="lp-btn-primary"
+                        style={{ fontSize: '0.72rem', padding: '0.25rem 0.6rem', whiteSpace: 'nowrap' }}
+                        disabled={grantStatus[u.id] === 'loading'}
+                        onClick={() => handleGrantCalls(u.id)}
+                        title="Grant 1000 more AI calls"
+                      >
+                        {grantStatus[u.id] === 'loading' ? '…' :
+                         grantStatus[u.id] === 'ok'      ? '✓ Granted' :
+                         grantStatus[u.id] === 'error'   ? '✗ Error' :
+                         '+ 1000 calls'}
+                      </button>
                     </td>
                   </tr>
                 ))}

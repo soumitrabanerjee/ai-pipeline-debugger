@@ -269,7 +269,8 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme,
             <div className="db-modal-body" style={{ padding: '1.5rem' }}>
               <p style={{ color: 'var(--text-muted)', marginBottom: '1.25rem', lineHeight: 1.6 }}>
                 You've used <strong style={{ color: 'var(--text)' }}>{quota?.used ?? 0} / {quota?.limit ?? 100}</strong> AI analysis calls.
-                To unlock unlimited access, complete a one-time UPI payment of <strong style={{ color: 'var(--text)' }}>₹1999</strong>.
+                Pay <strong style={{ color: 'var(--text)' }}>₹1999</strong> via UPI to unlock <strong style={{ color: 'var(--text)' }}>1000 more calls</strong>.
+                Each top-up adds 1000 calls — you can pay again whenever you need more.
               </p>
               <div style={{ background: 'var(--accent-subtle)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '10px', padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem' }}>UPI ID</p>
@@ -346,7 +347,7 @@ export default function Dashboard({ onBack, user, onSignOut, theme, toggleTheme,
         {quotaExceeded && (
           <div style={{ background: 'var(--failed-bg)', border: '1px solid var(--failed-border)', borderRadius: '10px', padding: '0.75rem 1.25rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
             <span style={{ color: 'var(--failed-text)', fontSize: '0.85rem', fontWeight: 500 }}>
-              ⚠ You've hit your AI analysis limit (100 calls). New errors won't be analysed by AI.
+              ⚠ You've hit your AI analysis limit ({quota?.limit} calls). New errors won't be analysed by AI.
             </span>
             <button className="lp-btn-primary" style={{ fontSize: '0.78rem', padding: '0.4rem 0.9rem', whiteSpace: 'nowrap' }} onClick={() => setShowUpgradeModal(true)}>
               Upgrade — ₹1999

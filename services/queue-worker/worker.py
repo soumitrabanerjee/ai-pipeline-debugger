@@ -196,15 +196,14 @@ def process_event(event_id: str, fields: dict):
 
     # ── 4. AI analysis (RAG-augmented when context available) ─────────────────
     # Check per-user AI quota before calling Claude
-    AI_QUOTA_LIMIT = 100
     quota_db = SessionLocal()
     user_row = None
     quota_exceeded = False
     try:
         user_row = quota_db.query(User).filter(User.id == int(workspace_id)).first()
-        if user_row and user_row.ai_calls_used >= AI_QUOTA_LIMIT:
+        if user_row and user_row.ai_calls_used >= user_row.ai_calls_limit:
             quota_exceeded = True
-            print(f"[worker] AI quota exceeded for workspace={workspace_id} ({user_row.ai_calls_used}/{AI_QUOTA_LIMIT})")
+            print(f"[worker] AI quota exceeded for workspace={workspace_id} ({user_row.ai_calls_used}/{user_row.ai_calls_limit})")
     except Exception as e:
         print(f"[worker] Quota check failed (will proceed without enforcement): {e}")
     finally:

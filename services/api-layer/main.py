@@ -234,7 +234,8 @@ async def lifespan(app: FastAPI):
         conn.execute(text("ALTER TABLE pipelines      ADD COLUMN IF NOT EXISTS workspace_id VARCHAR NOT NULL DEFAULT 'default'"))
         conn.execute(text("ALTER TABLE pipeline_runs  ADD COLUMN IF NOT EXISTS workspace_id VARCHAR NOT NULL DEFAULT 'default'"))
         conn.execute(text("ALTER TABLE errors         ADD COLUMN IF NOT EXISTS workspace_id VARCHAR NOT NULL DEFAULT 'default'"))
-        conn.execute(text("ALTER TABLE users          ADD COLUMN IF NOT EXISTS ai_calls_used INTEGER NOT NULL DEFAULT 0"))
+        conn.execute(text("ALTER TABLE users          ADD COLUMN IF NOT EXISTS ai_calls_used  INTEGER NOT NULL DEFAULT 0"))
+        conn.execute(text("ALTER TABLE users          ADD COLUMN IF NOT EXISTS ai_calls_limit INTEGER NOT NULL DEFAULT 100"))
 
         # ── NOT NULL enforcement (fill nulls first, then set constraint) ──────
         conn.execute(text("UPDATE pipelines      SET status   = 'Failed'   WHERE status   IS NULL"))
@@ -773,11 +774,10 @@ def get_dashboard_data(
         .order_by(Error.detected_at.desc())
         .all()
     )
-    AI_QUOTA_LIMIT = 100
     return {
         "pipelines": [{"name": p.name, "status": p.status, "lastRun": p.last_run} for p in pipelines],
         "errors":    [{"pipeline": e.pipeline_name, "error": e.error_type, "rootCause": e.root_cause, "fix": e.fix, "detectedAt": e.detected_at, "rawLog": e.raw_log} for e in errors],
-        "aiQuota":   {"used": current_user.ai_calls_used, "limit": AI_QUOTA_LIMIT},
+        "aiQuota":   {"used": current_user.ai_calls_used, "limit": current_user.ai_calls_limit},
     }
 
 @app.get("/pipelines/{pipeline_name}/errors", response_model=List[ErrorItem])
@@ -1099,14 +1099,34 @@ def admin_users(request: Request, db: Session = Depends(get_db), _: User = Depen
         api_key   = db.query(ApiKey).filter(ApiKey.workspace_id == ws, ApiKey.is_active == True).first()
         result.append({
             **_user_out(u),
-            "id":             u.id,
-            "created_at":     u.created_at,
-            "pipeline_count": pipelines,
-            "error_count":    errors,
-            "run_count":      runs,
-            "api_key_prefix": api_key.key_prefix if api_key else None,
+            "id":              u.id,
+            "created_at":      u.created_at,
+            "pipeline_count":  pipelines,
+            "error_count":     errors,
+            "run_count":       runs,
+            "api_key_prefix":  api_key.key_prefix if api_key else None,
+            "ai_calls_used":   u.ai_calls_used,
+            "ai_calls_limit":  u.ai_calls_limit,
         })
     return result
+
+
+@app.post("/admin/users/{user_id}/grant-calls")
+@limiter.limit("60/minute")
+def admin_grant_calls(
+    request: Request,
+    user_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_admin_user),
+):
+    """Grant the user 1000 additional AI calls by raising their limit."""
+    u = db.query(User).filter(User.id == user_id).first()
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+    u.ai_calls_limit = u.ai_calls_limit + 1000
+    db.commit()
+    db.refresh(u)
+    return {"user_id": u.id, "ai_calls_used": u.ai_calls_used, "ai_calls_limit": u.ai_calls_limit}
 
 
 @app.delete("/runbooks/{source_file}", status_code=204)
