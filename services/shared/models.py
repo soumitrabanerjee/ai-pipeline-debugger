@@ -87,6 +87,7 @@ class User(Base):
     session_token = Column(String,  nullable=True, unique=True, index=True)
     created_at    = Column(String,  nullable=False)
     is_admin      = Column(Boolean, nullable=False, default=False, server_default="false")
+    ai_calls_used = Column(Integer, nullable=False, default=0, server_default="0")
 
 
 class PendingRegistration(Base):
