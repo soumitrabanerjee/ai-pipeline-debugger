@@ -66,14 +66,20 @@ def _get_workspace_from_api_key(
     - Valid: returns the workspace_id bound to that key.
     """
     if not x_api_key:
-        raise HTTPException(status_code=401, detail="API key required. Include x-api-key header.")
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized access. Kindly provide a valid access key via the x-api-key header.",
+        )
     key_hash = hashlib.sha256(x_api_key.encode()).hexdigest()
     record = db.query(ApiKey).filter(
         ApiKey.key_hash == key_hash,
         ApiKey.is_active == True,
     ).first()
     if not record:
-        raise HTTPException(status_code=401, detail="Invalid or revoked API key")
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized access. Kindly provide a valid access key.",
+        )
     return record.workspace_id
 
 

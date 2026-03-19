@@ -487,10 +487,16 @@ def get_current_user(
     db: Session = Depends(get_db),
 ) -> User:
     if not x_session_token:
-        raise HTTPException(status_code=401, detail="Missing session token")
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized access. Kindly provide a valid access key via the x-session-token header.",
+        )
     user = db.query(User).filter(User.session_token == x_session_token).first()
     if not user:
-        raise HTTPException(status_code=401, detail="Invalid or expired session token")
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized access. Kindly provide a valid access key.",
+        )
     return user
 
 def _user_out(user: User) -> dict:
