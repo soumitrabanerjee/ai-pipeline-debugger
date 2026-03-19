@@ -84,6 +84,17 @@ jobs:
             cp infra/nginx/piplex.conf /etc/nginx/sites-available/piplex
             nginx -t && systemctl reload nginx
 
-            docker-compose up -d --build
+            docker-compose up -d --build --remove-orphans
             docker-compose exec -T postgres psql -U debugger -d pipeline_debugger \
               -c "CREATE EXTENSION IF NOT EXISTS vector;" 2>/dev/null || true
+
+            # Prune dangling images to free disk space
+            docker image prune -f
+
+            # ── Post-deploy health checks ────────────────────────────────
+            echo "Waiting for services to be healthy..."
+            sleep 10
+            curl -sf http://localhost:8001/health || (echo "api-layer unhealthy" && exit 1)
+            curl -sf http://localhost:8000/health || (echo "ingestion-api unhealthy" && exit 1)
+            curl -sf http://localhost:8003/health || (echo "webhook-collector unhealthy" && exit 1)
+            echo "All services healthy — deploy complete."
