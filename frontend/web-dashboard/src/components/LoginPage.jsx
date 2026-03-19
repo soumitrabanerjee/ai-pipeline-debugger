@@ -24,6 +24,7 @@ export default function LoginPage({ onLogin, onBack }) {
   const [tab, setTab]                       = useState('signin')
   const [email, setEmail]                   = useState('')
   const [password, setPassword]             = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [name, setName]                     = useState('')
   const [error, setError]                   = useState(null)
   const [loading, setLoading]               = useState(false)
@@ -38,6 +39,9 @@ export default function LoginPage({ onLogin, onBack }) {
     setError(null)
     if (!email || !password) { setError('Email and password are required.'); return }
     if (tab === 'signup' && !name) { setError('Name is required.'); return }
+
+    if (tab === 'signup' && password.length < 8) { setError('Password must be at least 8 characters.'); return }
+    if (tab === 'signup' && password !== confirmPassword) { setError('Passwords do not match.'); return }
 
     setLoading(true)
     try {
@@ -274,11 +278,11 @@ export default function LoginPage({ onLogin, onBack }) {
           <div className="auth-tabs">
             <button
               className={tab === 'signin' ? 'auth-tab auth-tab-active' : 'auth-tab'}
-              onClick={() => { setTab('signin'); setError(null) }}
+              onClick={() => { setTab('signin'); setError(null); setConfirmPassword('') }}
             >Sign In</button>
             <button
               className={tab === 'signup' ? 'auth-tab auth-tab-active' : 'auth-tab'}
-              onClick={() => { setTab('signup'); setError(null) }}
+              onClick={() => { setTab('signup'); setError(null); setConfirmPassword('') }}
             >Sign Up</button>
           </div>
 
@@ -318,6 +322,19 @@ export default function LoginPage({ onLogin, onBack }) {
                 autoComplete={tab === 'signin' ? 'current-password' : 'new-password'}
               />
             </div>
+            {tab === 'signup' && (
+              <div className="auth-field">
+                <label className="auth-label">Confirm Password</label>
+                <input
+                  className="auth-input"
+                  type="password"
+                  placeholder="••••••••"
+                  value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
+                  autoComplete="new-password"
+                />
+              </div>
+            )}
 
             {error && <p className="auth-error">{error}</p>}
 

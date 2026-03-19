@@ -511,6 +511,9 @@ def _auto_create_api_key(user: User, db: Session) -> str:
 @app.post("/auth/register", response_model=AuthResponse, status_code=201)
 @limiter.limit("10/minute")
 def register(request: Request, req: RegisterRequest, db: Session = Depends(get_db)):
+    if len(req.password) < 8:
+        raise HTTPException(status_code=422, detail="Password must be at least 8 characters.")
+
     # Reject if a verified account already exists for this email
     if db.query(User).filter(User.email == req.email).first():
         raise HTTPException(status_code=409, detail="An account with this email already exists.")
