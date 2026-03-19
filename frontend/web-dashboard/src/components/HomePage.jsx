@@ -56,6 +56,7 @@ function useDashboardData() {
 export default function HomePage({ user, onOpenDashboard, onOpenAdmin, onSignOut, theme, toggleTheme }) {
   const health = useServiceHealth()
   const data   = useDashboardData()
+  const [pipelineTab, setPipelineTab] = useState('airflow')
 
   const failed  = data.pipelines.filter(p => p.status === 'Failed').length
   const success = data.pipelines.filter(p => p.status === 'Success').length
@@ -224,22 +225,54 @@ export default function HomePage({ user, onOpenDashboard, onOpenAdmin, onSignOut
 
           {/* ── Connect pipeline ── */}
           <div className="db-stat-card">
-            <h2 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '1rem' }}>Connect your pipeline</h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <h2 style={{ fontSize: '0.95rem', fontWeight: 700, marginBottom: '0.75rem' }}>Connect your pipeline</h2>
 
-              <button className="dashboard-button" style={{ justifyContent: 'flex-start' }} onClick={onOpenDashboard}>
-                Open Dashboard →
-              </button>
+            {/* Tab selector */}
+            <div style={{ display: 'flex', gap: '0.35rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+              {[
+                { id: 'airflow', label: '🌬️ Airflow' },
+                { id: 'spark',   label: '⚡ PySpark' },
+                { id: 'curl',    label: '🔗 curl' },
+                { id: 'prefect', label: '🔷 Prefect' },
+              ].map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setPipelineTab(t.id)}
+                  style={{
+                    fontSize: '0.72rem', fontWeight: 600, padding: '0.25rem 0.65rem',
+                    borderRadius: 'var(--radius-full)', border: '1px solid var(--border)',
+                    cursor: 'pointer',
+                    background: pipelineTab === t.id ? 'var(--accent)' : 'var(--bg-input)',
+                    color:      pipelineTab === t.id ? '#fff'          : 'var(--text-secondary)',
+                  }}
+                >{t.label}</button>
+              ))}
+            </div>
 
-              {/* Airflow snippet */}
-              <div style={{ background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', padding: '0.75rem', border: '1px solid var(--border)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                  <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Airflow — on_failure_callback</span>
-                  <button
-                    onClick={() => navigator.clipboard.writeText(`import requests\n\ndef piplex_failure_callback(context):\n    requests.post(\n        "${WEBHOOK_URL}/airflow",\n        headers={"x-api-key": "YOUR_API_KEY"},\n        json={\n            "dag_id": context["dag"].dag_id,\n            "run_id": context["run_id"],\n            "task_id": context["task"].task_id,\n            "exception": str(context.get("exception", "")),\n        }\n    )`)}
-                    style={{ fontSize: '0.68rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '0.1rem 0.3rem' }}
-                  >copy</button>
-                </div>
+            {/* Snippets */}
+            <div style={{ background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', padding: '0.75rem', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  {pipelineTab === 'airflow' && 'Airflow — on_failure_callback'}
+                  {pipelineTab === 'spark'   && 'PySpark — exception handler'}
+                  {pipelineTab === 'curl'    && 'Generic — curl'}
+                  {pipelineTab === 'prefect' && 'Prefect — on_failure hook'}
+                </span>
+                <button
+                  onClick={() => {
+                    const snippets = {
+                      airflow: `import requests\n\ndef piplex_failure_callback(context):\n    requests.post(\n        "${WEBHOOK_URL}/airflow",\n        headers={"x-api-key": "YOUR_API_KEY"},\n        json={\n            "dag_id":    context["dag"].dag_id,\n            "run_id":    context["run_id"],\n            "task_id":   context["task"].task_id,\n            "state":     "failed",\n            "exception": str(context.get("exception", "")),\n        }\n    )`,
+                      spark:   `import requests\nfrom datetime import datetime, timezone\n\ndef send_to_piplex(job_id, run_id, message, level="ERROR"):\n    requests.post(\n        "${INGEST_URL}",\n        headers={"x-api-key": "YOUR_API_KEY"},\n        json={\n            "source":    "spark",\n            "job_id":    job_id,\n            "run_id":    run_id,\n            "level":     level,\n            "timestamp": datetime.now(timezone.utc).isoformat(),\n            "message":   message,\n        }\n    )\n\n# In your Spark job:\ntry:\n    df.write.parquet(output_path)\nexcept Exception as e:\n    send_to_piplex("my-spark-job", spark.sparkContext.applicationId, str(e))\n    raise`,
+                      curl:    `curl -X POST ${WEBHOOK_URL}/generic \\\n  -H "x-api-key: YOUR_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"pipeline":"my-pipeline","level":"ERROR","message":"Job failed"}'`,
+                      prefect: `from prefect import flow\nimport requests\n\ndef piplex_on_failure(flow, flow_run, state):\n    requests.post(\n        "${WEBHOOK_URL}/generic",\n        headers={"x-api-key": "YOUR_API_KEY"},\n        json={\n            "pipeline": flow.name,\n            "level":    "ERROR",\n            "message":  str(state.message or "Flow failed"),\n        }\n    )\n\n@flow(on_failure=[piplex_on_failure])\ndef my_flow():\n    ...`,
+                    }
+                    navigator.clipboard.writeText(snippets[pipelineTab])
+                  }}
+                  style={{ fontSize: '0.68rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '0.1rem 0.3rem' }}
+                >copy</button>
+              </div>
+
+              {pipelineTab === 'airflow' && (
                 <pre style={{ margin: 0, fontSize: '0.72rem', color: 'var(--accent)', overflowX: 'auto', lineHeight: 1.6, whiteSpace: 'pre' }}>{`import requests
 
 def piplex_failure_callback(context):
@@ -247,35 +280,75 @@ def piplex_failure_callback(context):
         "${WEBHOOK_URL}/airflow",
         headers={"x-api-key": "YOUR_API_KEY"},
         json={
-            "dag_id": context["dag"].dag_id,
-            "run_id": context["run_id"],
-            "task_id": context["task"].task_id,
+            "dag_id":    context["dag"].dag_id,
+            "run_id":    context["run_id"],
+            "task_id":   context["task"].task_id,
+            "state":     "failed",
             "exception": str(context.get("exception", "")),
         }
     )`}</pre>
-              </div>
+              )}
 
-              {/* curl / generic snippet */}
-              <div style={{ background: 'var(--bg-input)', borderRadius: 'var(--radius-md)', padding: '0.75rem', border: '1px solid var(--border)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                  <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Generic — curl</span>
-                  <button
-                    onClick={() => navigator.clipboard.writeText(`curl -X POST ${WEBHOOK_URL}/generic \\\n  -H "x-api-key: YOUR_API_KEY" \\\n  -H "Content-Type: application/json" \\\n  -d '{"pipeline":"my-pipeline","level":"ERROR","message":"Job failed"}'`)}
-                    style={{ fontSize: '0.68rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '0.1rem 0.3rem' }}
-                  >copy</button>
-                </div>
+              {pipelineTab === 'spark' && (
+                <pre style={{ margin: 0, fontSize: '0.72rem', color: 'var(--accent)', overflowX: 'auto', lineHeight: 1.6, whiteSpace: 'pre' }}>{`import requests
+from datetime import datetime, timezone
+
+def send_to_piplex(job_id, run_id, message, level="ERROR"):
+    requests.post(
+        "${INGEST_URL}",
+        headers={"x-api-key": "YOUR_API_KEY"},
+        json={
+            "source":    "spark",
+            "job_id":    job_id,
+            "run_id":    run_id,
+            "level":     level,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "message":   message,
+        }
+    )
+
+# In your Spark job:
+try:
+    df.write.parquet(output_path)
+except Exception as e:
+    send_to_piplex("my-spark-job",
+                   spark.sparkContext.applicationId, str(e))
+    raise`}</pre>
+              )}
+
+              {pipelineTab === 'curl' && (
                 <pre style={{ margin: 0, fontSize: '0.72rem', color: 'var(--accent)', overflowX: 'auto', lineHeight: 1.6, whiteSpace: 'pre' }}>{`curl -X POST ${WEBHOOK_URL}/generic \\
   -H "x-api-key: YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{"pipeline":"my-pipeline",
        "level":"ERROR",
        "message":"Job failed"}'`}</pre>
-              </div>
+              )}
 
-              <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: 0 }}>
-                Replace <code style={{ color: 'var(--accent)' }}>YOUR_API_KEY</code> with your key from the API Keys section in the Dashboard.
-              </p>
+              {pipelineTab === 'prefect' && (
+                <pre style={{ margin: 0, fontSize: '0.72rem', color: 'var(--accent)', overflowX: 'auto', lineHeight: 1.6, whiteSpace: 'pre' }}>{`from prefect import flow
+import requests
+
+def piplex_on_failure(flow, flow_run, state):
+    requests.post(
+        "${WEBHOOK_URL}/generic",
+        headers={"x-api-key": "YOUR_API_KEY"},
+        json={
+            "pipeline": flow.name,
+            "level":    "ERROR",
+            "message":  str(state.message or "Flow failed"),
+        }
+    )
+
+@flow(on_failure=[piplex_on_failure])
+def my_flow():
+    ...`}</pre>
+              )}
             </div>
+
+            <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '0.5rem 0 0' }}>
+              Replace <code style={{ color: 'var(--accent)' }}>YOUR_API_KEY</code> with your key from the API Keys section in the Dashboard.
+            </p>
           </div>
         </div>
 
