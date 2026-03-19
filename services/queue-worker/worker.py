@@ -186,15 +186,16 @@ def process_event(event_id: str, fields: dict):
 
     # ── 3. Retrieve similar past incidents (only if embedding succeeded) ───────
     similar_incidents: list[str] = []
+    runbook_sections:  list[str] = []
     if embedding:
-        similar_incidents = retrieve_similar(embedding, workspace_id)
-        if similar_incidents:
-            print(f"[worker] Retrieved {len(similar_incidents)} similar incident(s) above threshold")
+        similar_incidents, runbook_sections = retrieve_similar(embedding, workspace_id)
+        if similar_incidents or runbook_sections:
+            print(f"[worker] Retrieved {len(similar_incidents)} similar incident(s), {len(runbook_sections)} runbook section(s) above threshold")
         else:
             print(f"[worker] No similar incidents found — using standard prompt")
 
     # ── 4. AI analysis (RAG-augmented when context available) ─────────────────
-    ai_result = analyze_with_ai(message, pipeline_context, similar_incidents)
+    ai_result = analyze_with_ai(message, pipeline_context, similar_incidents, runbook_sections)
 
     # ── 4b. Root Cause Engine — rank hypotheses, pick the best one ────────────
     hypotheses = build_hypotheses(ai_result, parsed)
