@@ -24,7 +24,6 @@ Environment variables:
   INGEST_URL   — ingestion API (default: http://localhost:8000/ingest)
 """
 
-import hashlib
 import os
 import uuid
 import subprocess
@@ -33,15 +32,8 @@ import requests
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import FastAPI, BackgroundTasks, Depends, Header, HTTPException
+from fastapi import FastAPI, BackgroundTasks, Header, HTTPException, Response
 from pydantic import BaseModel
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
-
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-sys.path.append(PROJECT_ROOT)
-
-from services.shared.models import Base, ApiKey
 
 INGEST_URL   = os.getenv("INGEST_URL",   "http://localhost:8000/ingest")
 SPARK_JOBS_DIR = os.path.join(
@@ -49,45 +41,7 @@ SPARK_JOBS_DIR = os.path.join(
     "..", "spark-jobs"
 )
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://debugger:debugger@localhost:5433/pipeline_debugger"
-)
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
 app = FastAPI(title="Log Collection Webhook Collector", version="1.0.0")
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-def _validate_api_key(
-    x_api_key: Optional[str] = Header(default=None),
-    db: Session = Depends(get_db),
-) -> str:
-    """Validate x-api-key against the database. Returns workspace_id on success."""
-    if not x_api_key:
-        raise HTTPException(
-            status_code=401,
-            detail="Unauthorized access. Kindly provide a valid access key via the x-api-key header.",
-        )
-    key_hash = hashlib.sha256(x_api_key.encode()).hexdigest()
-    record = db.query(ApiKey).filter(
-        ApiKey.key_hash == key_hash,
-        ApiKey.is_active == True,
-    ).first()
-    if not record:
-        raise HTTPException(
-            status_code=401,
-            detail="Unauthorized access. Kindly provide a valid access key.",
-        )
-    return x_api_key  # pass the raw key along for forwarding to ingestion API
 
 
 # ── schemas ───────────────────────────────────────────────────────────────────
@@ -116,16 +70,14 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _forward(payload: dict, api_key: str):
-    """POST the normalised event to the ingestion API (fire-and-forget)."""
-    try:
-        resp = requests.post(INGEST_URL, json=payload, headers={"x-api-key": api_key}, timeout=10)
-        print(
-            f"[webhook] Forwarded pipeline={payload['job_id']} "
-            f"run={payload['run_id']} → HTTP {resp.status_code}"
-        )
-    except Exception as e:
-        print(f"[webhook] Forward failed: {e}")
+def _forward(payload: dict, api_key: str) -> requests.Response:
+    """POST the normalised event to the ingestion API. Returns the response."""
+    resp = requests.post(INGEST_URL, json=payload, headers={"x-api-key": api_key}, timeout=10)
+    print(
+        f"[webhook] Forwarded pipeline={payload['job_id']} "
+        f"run={payload['run_id']} → HTTP {resp.status_code}"
+    )
+    return resp
 
 
 # ── endpoints ─────────────────────────────────────────────────────────────────
@@ -256,7 +208,7 @@ def run_student_analytics_sync():
 
 
 @app.post("/webhook/airflow", status_code=202)
-def airflow_webhook(body: AirflowWebhook, background: BackgroundTasks, x_api_key: str = Depends(_validate_api_key)):
+def airflow_webhook(body: AirflowWebhook, x_api_key: Optional[str] = Header(default=None)):
     """
     Accepts Airflow on_failure_callback payloads.
 
@@ -274,6 +226,11 @@ def airflow_webhook(body: AirflowWebhook, background: BackgroundTasks, x_api_key
           )
       }
     """
+    if not x_api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized access. Kindly provide a valid access key via the x-api-key header.",
+        )
     payload = {
         "source": "airflow",
         "job_id": body.dag_id,
@@ -284,12 +241,23 @@ def airflow_webhook(body: AirflowWebhook, background: BackgroundTasks, x_api_key
         "message": body.exception,
         "raw_log_uri": body.log_url,
     }
-    background.add_task(_forward, payload, x_api_key)
+    try:
+        resp = _forward(payload, x_api_key)
+    except Exception as e:
+        print(f"[webhook] Forward failed: {e}")
+        raise HTTPException(status_code=502, detail="Failed to reach ingestion API")
+    if resp.status_code == 401:
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized access. Kindly provide a valid access key.",
+        )
+    if resp.status_code not in (200, 202):
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
     return {"status": "accepted", "run_id": body.run_id}
 
 
 @app.post("/webhook/generic", status_code=202)
-def generic_webhook(body: GenericWebhook, background: BackgroundTasks, x_api_key: str = Depends(_validate_api_key)):
+def generic_webhook(body: GenericWebhook, x_api_key: Optional[str] = Header(default=None)):
     """
     Generic webhook — works with any system that can HTTP POST.
 
@@ -299,6 +267,11 @@ def generic_webhook(body: GenericWebhook, background: BackgroundTasks, x_api_key
            -H 'x-api-key: <your-api-key>' \\
            -d '{"pipeline":"my-etl","level":"ERROR","message":"OOM error"}'
     """
+    if not x_api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized access. Kindly provide a valid access key via the x-api-key header.",
+        )
     run_id = body.run_id or str(uuid.uuid4())
     payload = {
         "source": body.source or "webhook",
@@ -308,5 +281,16 @@ def generic_webhook(body: GenericWebhook, background: BackgroundTasks, x_api_key
         "timestamp": body.timestamp or _now_iso(),
         "message": body.message,
     }
-    background.add_task(_forward, payload, x_api_key)
+    try:
+        resp = _forward(payload, x_api_key)
+    except Exception as e:
+        print(f"[webhook] Forward failed: {e}")
+        raise HTTPException(status_code=502, detail="Failed to reach ingestion API")
+    if resp.status_code == 401:
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized access. Kindly provide a valid access key.",
+        )
+    if resp.status_code not in (200, 202):
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
     return {"status": "accepted", "run_id": run_id}

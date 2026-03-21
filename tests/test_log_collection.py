@@ -20,17 +20,15 @@ sys.path.insert(0, _LAYER)
 
 from log_parser import parse_log_line, build_ingest_payload, ParsedLine
 from agent import LogDirectoryHandler, send_to_ingest, scan_existing, _FileTailer
-import webhook_collector
-from webhook_collector import app as webhook_app, _validate_api_key
-
-# Bypass DB validation in unit tests — API key auth is covered by test_api_keys.py
-def _mock_validate_api_key():
-    return "dpd_test_key"
-
-webhook_app.dependency_overrides[_validate_api_key] = _mock_validate_api_key
+from webhook_collector import app as webhook_app
 
 webhook_client = TestClient(webhook_app)
 _API_KEY_HDR = {"x-api-key": "dpd_test_key"}
+
+# Mock response returned by _forward in webhook tests
+class _MockResp:
+    status_code = 202
+    text = ""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -311,12 +309,12 @@ class TestAirflowWebhook:
     }
 
     def test_returns_202(self):
-        with patch("webhook_collector._forward"):
+        with patch("webhook_collector._forward", return_value=_MockResp()):
             resp = webhook_client.post("/webhook/airflow", json=self._BODY, headers=_API_KEY_HDR)
         assert resp.status_code == 202
 
     def test_returns_run_id(self):
-        with patch("webhook_collector._forward"):
+        with patch("webhook_collector._forward", return_value=_MockResp()):
             resp = webhook_client.post("/webhook/airflow", json=self._BODY, headers=_API_KEY_HDR)
         assert resp.json()["run_id"] == self._BODY["run_id"]
 
@@ -328,6 +326,7 @@ class TestAirflowWebhook:
         captured = {}
         def fake_forward(payload, api_key):
             captured.update(payload)
+            return _MockResp()
         with patch("webhook_collector._forward", side_effect=fake_forward):
             webhook_client.post("/webhook/airflow", json=self._BODY, headers=_API_KEY_HDR)
         assert captured["source"] == "airflow"
@@ -336,6 +335,7 @@ class TestAirflowWebhook:
         captured = {}
         def fake_forward(payload, api_key):
             captured.update(payload)
+            return _MockResp()
         with patch("webhook_collector._forward", side_effect=fake_forward):
             webhook_client.post("/webhook/airflow", json=self._BODY, headers=_API_KEY_HDR)
         assert captured["job_id"] == "customer_etl"
@@ -344,6 +344,7 @@ class TestAirflowWebhook:
         captured = {}
         def fake_forward(payload, api_key):
             captured.update(payload)
+            return _MockResp()
         with patch("webhook_collector._forward", side_effect=fake_forward):
             webhook_client.post("/webhook/airflow", json=self._BODY, headers=_API_KEY_HDR)
         assert captured["level"] == "ERROR"
@@ -358,19 +359,19 @@ class TestGenericWebhook:
     }
 
     def test_returns_202(self):
-        with patch("webhook_collector._forward"):
+        with patch("webhook_collector._forward", return_value=_MockResp()):
             resp = webhook_client.post("/webhook/generic", json=self._BODY, headers=_API_KEY_HDR)
         assert resp.status_code == 202
 
     def test_generates_run_id_when_not_provided(self):
-        with patch("webhook_collector._forward"):
+        with patch("webhook_collector._forward", return_value=_MockResp()):
             resp = webhook_client.post("/webhook/generic", json=self._BODY, headers=_API_KEY_HDR)
         run_id = resp.json()["run_id"]
         uuid.UUID(run_id)  # raises if not a valid UUID
 
     def test_uses_provided_run_id(self):
         body = {**self._BODY, "run_id": "my-custom-run-id"}
-        with patch("webhook_collector._forward"):
+        with patch("webhook_collector._forward", return_value=_MockResp()):
             resp = webhook_client.post("/webhook/generic", json=body, headers=_API_KEY_HDR)
         assert resp.json()["run_id"] == "my-custom-run-id"
 
@@ -378,6 +379,7 @@ class TestGenericWebhook:
         captured = {}
         def fake_forward(payload, api_key):
             captured.update(payload)
+            return _MockResp()
         with patch("webhook_collector._forward", side_effect=fake_forward):
             webhook_client.post("/webhook/generic", json=self._BODY, headers=_API_KEY_HDR)
         assert captured["job_id"] == "billing-etl"
@@ -387,6 +389,7 @@ class TestGenericWebhook:
         captured = {}
         def fake_forward(payload, api_key):
             captured.update(payload)
+            return _MockResp()
         with patch("webhook_collector._forward", side_effect=fake_forward):
             webhook_client.post("/webhook/generic", json=body, headers=_API_KEY_HDR)
         assert captured["level"] == "ERROR"
