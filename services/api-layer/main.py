@@ -532,44 +532,6 @@ def register(request: Request, req: RegisterRequest, db: Session = Depends(get_d
     if db.query(User).filter(User.email == req.email).first():
         raise HTTPException(status_code=409, detail="An account with this email already exists.")
 
-    if SMTP_ENABLED:
-        otp            = _generate_otp()
-        otp_expires_at = (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat()
-
-        # Upsert into pending_registrations — no User row written yet
-        pending = db.query(PendingRegistration).filter(PendingRegistration.email == req.email).first()
-        if pending:
-            # Existing pending entry: refresh OTP + update password (user may have retyped)
-            pending.name           = req.name
-            pending.password_hash  = hash_password(req.password)
-            pending.otp_code       = otp
-            pending.otp_expires_at = otp_expires_at
-        else:
-            pending = PendingRegistration(
-                email          = req.email,
-                name           = req.name,
-                password_hash  = hash_password(req.password),
-                otp_code       = otp,
-                otp_expires_at = otp_expires_at,
-                created_at     = datetime.now(timezone.utc).isoformat(),
-            )
-            db.add(pending)
-        db.commit()
-
-        sent = send_email(req.email, "Your PiPlex verification code", _otp_email_html(req.name or "", otp))
-        if not sent:
-            # Email failed — clean up pending row so the user can retry cleanly
-            db.query(PendingRegistration).filter(PendingRegistration.email == req.email).delete()
-            db.commit()
-            raise HTTPException(
-                status_code=503,
-                detail="Could not send verification email. Please check your email address or try again later."
-            )
-        # Return a placeholder user shape — no real User row exists yet
-        placeholder = {"email": req.email, "name": req.name, "paid": False, "plan": None, "is_admin": False}
-        return {"token": "", "user": placeholder, "api_key": None, "needs_verification": True}
-
-    # ── SMTP not configured: skip OTP, create user + API key immediately ──────
     token = secrets.token_urlsafe(32)
     user  = User(
         email         = req.email,
